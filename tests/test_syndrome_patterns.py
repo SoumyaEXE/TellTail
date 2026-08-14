@@ -156,15 +156,41 @@ VARIANTS = extract_variants()
 # fixtures
 # ---------------------------------------------------------------------------
 
+def extract_activity_class() -> dict[str, str]:
+    """state -> activity_class, out of the REF.ETHOGRAM seed."""
+    text = strip_line_comments(SQL_REF_SEED.read_text(encoding="utf-8"))
+    block = re.search(r"INSERT INTO REF\.ETHOGRAM(.*?)AS v\(state,", text, re.S)
+    assert block, "could not locate the REF.ETHOGRAM insert"
+    out = {}
+    for m in re.finditer(
+        r"\('([A-Z_]+)',\s*'[^']*',\s*'[^']*',\s*'[^']*',\s*"
+        r"(?:TRUE|FALSE),\s*(?:TRUE|FALSE),\s*'([A-Z_]+)'",
+        block.group(1),
+    ):
+        out[m.group(1)] = m.group(2)
+    assert out, "no ethogram rows parsed"
+    return out
+
+
+ACTIVITY_CLASS = extract_activity_class()
+
+
 def seq(*runs: tuple[str, int], start: datetime = T0, dog_id: int = 7, test_num: int = 1):
     """seq(('REST',1), ('SHAKE',1), ('SCRATCH',3)) -> one row per second."""
     rows = []
     ts = start
     for state, n in runs:
         for _ in range(n):
-            rows.append(
-                {"dog_id": dog_id, "test_num": test_num, "epoch_ts": ts, "state": state}
-            )
+            rows.append({
+                "dog_id": dog_id, "test_num": test_num, "epoch_ts": ts,
+                "state": state,
+                # S3 matches on activity_class rather than on state; every
+                # fixture row therefore carries both, mirroring
+                # MARTS.V_SYNDROME_INPUT. Derived from the same table the
+                # warehouse derives it from, so a regrouping there fails here
+                # instead of quietly diverging.
+                "activity_class": ACTIVITY_CLASS.get(state, "OTHER"),
+            })
             ts += timedelta(seconds=1)
     return rows
 

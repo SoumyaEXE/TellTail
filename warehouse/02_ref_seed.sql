@@ -292,8 +292,9 @@ FROM VALUES
   -- recover means STOPPED MOVING, not lying down. Defined as REST alone this
   -- pattern was unsatisfiable on any corpus: TROT -> REST occurs zero times in
   -- 106k epochs, because a dog coming off a trot stands or sits first. A burst
-  -- is likewise any fast gait, so GALLOP counts.
-  'burst AS state IN (''TROT'',''GALLOP''), recover AS state IN (''REST'',''SIT'',''STAND''), burst2 AS state IN (''TROT'',''GALLOP''), recover2 AS state IN (''REST'',''SIT'',''STAND'')',
+  -- is likewise any fast gait, so GALLOP counts. Matched through
+  -- REF.ETHOGRAM.activity_class rather than a state list — see that column.
+  'burst AS activity_class = ''FAST_GAIT'', recover AS activity_class = ''STATIONARY'', burst2 AS activity_class = ''FAST_GAIT'', recover2 AS activity_class = ''STATIONARY''',
   15, 3,
   'Activity bursts collapsing in length while recovery intervals lengthen. Reduced exercise tolerance is an early sign in cardiac and respiratory disease, and it appears in the shape of the day long before total activity falls.',
   'Total activity minutes are IDENTICAL. The same minutes are redistributed into shorter bursts with progressively longer recoveries. A daily total is definitionally blind to this; only the ordered burst/recovery ratio shows it.'
