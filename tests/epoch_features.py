@@ -59,6 +59,34 @@ def load_params() -> dict[str, float]:
     return out
 
 
+def load_activity_class() -> dict[str, str]:
+    """state -> activity_class, parsed out of the REF.ETHOGRAM seed.
+
+    Parsed rather than copied for the same reason load_params is: S3 matches on
+    activity_class, so a regrouping in the warehouse that this file did not
+    follow would leave the offline suite validating a pattern the warehouse no
+    longer runs.
+    """
+    text = REF_SEED.read_text(encoding="utf-8")
+    block = re.search(r"INSERT INTO REF\.ETHOGRAM(.*?)AS v\(state,", text, re.S)
+    if not block:
+        raise RuntimeError("could not locate the REF.ETHOGRAM insert in 02_ref_seed.sql")
+    out = {
+        m.group(1): m.group(2)
+        for m in re.finditer(
+            r"\('([A-Z_]+)',\s*'[^']*',\s*'[^']*',\s*'[^']*',\s*"
+            r"(?:TRUE|FALSE),\s*(?:TRUE|FALSE),\s*'([A-Z_]+)'",
+            block.group(1),
+        )
+    }
+    if not out:
+        raise RuntimeError("parsed no states out of the REF.ETHOGRAM insert")
+    return out
+
+
+ACTIVITY_CLASS = load_activity_class()
+
+
 def epoch_features(block: np.ndarray) -> dict[str, float]:
     """One second of samples (n, 12) -> the feature vector the SQL computes.
 

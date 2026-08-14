@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import demo_spike as ds  # noqa: E402
 from epoch_features import (  # noqa: E402
+    ACTIVITY_CLASS,
     epoch_features,
     ladder_state,
     load_params,
@@ -86,7 +87,9 @@ def classify_sequence(sequence: list[tuple[str, int]], seed: int = SEED) -> list
         after = any(loco[i + 1:i + 3])
         state, source = ladder_state(f, PARAMS, loco_before=before, loco_after=after)
         out.append({"epoch_ts": i, "state": state, "source": source, "dog_id": 1,
-                    "test_num": 1})
+                    "test_num": 1,
+                    # S3 matches activity_class, mirroring MARTS.V_SYNDROME_INPUT
+                    "activity_class": ACTIVITY_CLASS.get(state, "OTHER")})
     return out
 
 
