@@ -4,7 +4,8 @@
       "Bash(python scripts/run_sql.py --only 05 --skip-bootstrap)",
       "Bash(python \"C:/Users/Soumya/AppData/Local/Temp/claude/c--Users-Soumya-Desktop-telltail/98191729-086b-4139-80d8-bcfbe383ae82/scratchpad/retrain.py\")",
       "Bash(python scripts/run_sql.py --only 06)",
-      "Bash(grep -vE \"^\\\\s*$\")"
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(python scripts/run_sql.py --only 07)"
     ]
   }
 }

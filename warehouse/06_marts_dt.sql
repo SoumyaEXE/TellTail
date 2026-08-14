@@ -336,8 +336,14 @@ WHERE s.state <> 'UNKNOWN';
 
 -- Trailing self-baseline on a five-minute grid. Bucketing first keeps the
 -- rolling window cheap: an hour of baseline is twelve buckets, not 3600 rows.
+-- DOWNSTREAM. A dynamic table may not lag longer than whatever reads it, and
+-- this one sits mid-chain: ACTIVITY_BASELINE -> DOG_DEVIATION -> PACK_STATUS,
+-- which the dashboard wants at 2 minutes. Declaring '5 minutes' here fails
+-- compilation. Freshness is declared once, at the consumer that actually has
+-- an opinion (PACK_STATUS); the interior of the chain inherits it. The
+-- 5-minute GRID this table computes on is a separate thing and is unchanged.
 CREATE OR REPLACE DYNAMIC TABLE MARTS.ACTIVITY_BASELINE
-    TARGET_LAG   = '5 minutes'
+    TARGET_LAG   = DOWNSTREAM
     WAREHOUSE    = ${SNOWFLAKE_WAREHOUSE}
     REFRESH_MODE = FULL
     COMMENT      = 'Per-dog trailing baseline (mean, sd) on a 5-minute grid.'
@@ -365,8 +371,14 @@ SELECT
 FROM bucketed;
 
 -- Cohort baseline. A dog with no history yet still gets a reference point.
+--
+-- DOWNSTREAM, not a wall-clock lag. A dynamic table may not have a longer lag
+-- than anything reading it, and MARTS.DOG_DEVIATION reads this at 5 minutes —
+-- a declared 15 minutes here fails compilation outright. DOWNSTREAM is also
+-- the honest declaration: this table exists to serve DOG_DEVIATION, so its
+-- freshness requirement is exactly its reader's, whatever that becomes.
 CREATE OR REPLACE DYNAMIC TABLE REF.BREED_COHORT
-    TARGET_LAG   = '15 minutes'
+    TARGET_LAG   = DOWNSTREAM
     WAREHOUSE    = ${SNOWFLAKE_WAREHOUSE}
     REFRESH_MODE = FULL
     COMMENT      = 'Activity distribution per age/weight cohort, across all dogs.'
@@ -391,8 +403,10 @@ GROUP BY cohort_id;
 -- on the timestamp condition itself, so a gap degrades the comparison honestly
 -- instead of corrupting it silently.
 -- ---------------------------------------------------------------------------
+-- DOWNSTREAM for the same reason as ACTIVITY_BASELINE above: PACK_STATUS
+-- reads this at 2 minutes.
 CREATE OR REPLACE DYNAMIC TABLE MARTS.DOG_DEVIATION
-    TARGET_LAG   = '5 minutes'
+    TARGET_LAG   = DOWNSTREAM
     WAREHOUSE    = ${SNOWFLAKE_WAREHOUSE}
     REFRESH_MODE = FULL
     COMMENT      = 'Current activity vs the dog own trailing baseline and its cohort.'
