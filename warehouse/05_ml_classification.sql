@@ -181,7 +181,12 @@ BEGIN
 
     BEGIN
         CREATE OR REPLACE SNOWFLAKE.ML.CLASSIFICATION ML.STATE_MODEL(
-            INPUT_DATA     => SYSTEM$QUERY_REFERENCE('SELECT * FROM ML.V_TRAIN'),
+            -- FULLY QUALIFIED. SYSTEM$QUERY_REFERENCE resolves its text without the
+            -- procedure's USE DATABASE/SCHEMA context, so a bare ML.V_TRAIN
+            -- fails with "does not exist or not authorized" and the handler
+            -- below silently drops to the rules classifier.
+            INPUT_DATA     => SYSTEM$QUERY_REFERENCE(
+                'SELECT * FROM ${SNOWFLAKE_DATABASE}.ML.V_TRAIN'),
             TARGET_COLNAME => 'STATE',
             CONFIG_OBJECT  => {'on_error': 'skip'}
         );

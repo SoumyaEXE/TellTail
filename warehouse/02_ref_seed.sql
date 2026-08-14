@@ -351,26 +351,46 @@ LANGUAGE SQL
 AS
 $$
 BEGIN
-    -- Rank dogs deterministically inside each breed, then take the top slice of
-    -- each breed. Deterministic because HASH() is stable, stratified because the
-    -- ranking is per breed, so the holdout is not accidentally all Labradors.
+    -- Deterministic, breed-spread, and the RIGHT SIZE.
+    --
+    -- The obvious formulation — take FLOOR(n_breed * fraction) from each breed,
+    -- with a floor of one so no breed is skipped — collapses on this roster.
+    -- There are 26 breeds across 45 dogs, so most breeds have one or two dogs,
+    -- GREATEST(1, ...) fires for every one of them, and the "22% holdout" is
+    -- actually 26 of 45 dogs: more than half the corpus, and a training set too
+    -- thin to learn anything.
+    --
+    -- Instead: rank dogs within their breed, then interleave breeds globally —
+    -- the first dog of each breed, then the second of each, and so on — and take
+    -- the first N of that global order. The count is exact, and because the
+    -- first pass covers distinct breeds the holdout is still spread across them.
     CREATE OR REPLACE TABLE REF.HOLDOUT_DOGS AS
     WITH ranked AS (
         SELECT
             d.dog_id,
             COALESCE(d.breed, 'unknown')                        AS breed,
+            HASH(d.dog_id, 'telltail-holdout-v1')               AS h,
             ROW_NUMBER() OVER (PARTITION BY COALESCE(d.breed,'unknown')
-                               ORDER BY HASH(d.dog_id, 'telltail-holdout-v1')) AS rn,
-            COUNT(*)    OVER (PARTITION BY COALESCE(d.breed,'unknown'))        AS n_breed
+                               ORDER BY HASH(d.dog_id, 'telltail-holdout-v1')) AS rn_in_breed
         FROM REF.DOG_INFO d
+    ),
+    interleaved AS (
+        SELECT dog_id, breed,
+               ROW_NUMBER() OVER (ORDER BY rn_in_breed, h) AS global_rank
+        FROM ranked
+    ),
+    target AS (
+        SELECT GREATEST(1, ROUND(COUNT(*) * :holdout_fraction)) AS n FROM REF.DOG_INFO
     )
-    SELECT dog_id, breed,
-           'breed-stratified deterministic holdout, fraction=' || :holdout_fraction AS reason
-    FROM ranked
-    WHERE rn <= GREATEST(1, FLOOR(n_breed * :holdout_fraction));
+    SELECT i.dog_id, i.breed,
+           'breed-interleaved deterministic holdout, fraction=' || :holdout_fraction
+           || ', n=' || t.n AS reason
+    FROM interleaved i CROSS JOIN target t
+    WHERE i.global_rank <= t.n;
 
     RETURN 'holdout dogs: ' || (SELECT COUNT(*) FROM REF.HOLDOUT_DOGS)
-        || ' of ' || (SELECT COUNT(*) FROM REF.DOG_INFO);
+        || ' of ' || (SELECT COUNT(*) FROM REF.DOG_INFO)
+        || ' across ' || (SELECT COUNT(DISTINCT breed) FROM REF.HOLDOUT_DOGS) || ' breeds';
 END;
 $$;
 
