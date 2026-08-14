@@ -156,25 +156,44 @@ def main() -> int:
         q(conn, "SHOW SNOWFLAKE.ML.ANOMALY_DETECTION")
         return "class registered in account"
 
-    @check("TOP_INSIGHTS available")
+    @check("SNOWFLAKE.ML.TOP_INSIGHTS available")
     def _ti():
-        q(conn, "SELECT 1 FROM TABLE(INFORMATION_SCHEMA.TOP_INSIGHTS("
-                "  SYSTEM$REFERENCE('TABLE','SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY'),"
-                "  SYSTEM$REFERENCE('TABLE','SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY'),"
-                "  'X')) LIMIT 0")
-        return "callable"
+        # The Top Insights call signature has moved between preview and GA, so
+        # this probe reports which shape (if either) this account accepts.
+        # ML.SP_RUN_TOP_INSIGHTS falls back to a transparent SQL contribution
+        # decomposition regardless, so a failure here costs presentation, not
+        # substance.
+        try:
+            q(conn, """
+                SELECT 1 FROM TABLE(SNOWFLAKE.ML.TOP_INSIGHTS(
+                    SELECT {'d': 'a'} AS dimensions, 1.0 AS metric, TRUE AS label
+                    FROM VALUES (1) AS v(x)
+                )) LIMIT 1
+            """)
+            return "native OBJECT-dimensions signature accepted"
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"{str(exc).splitlines()[0][:120]} — the SQL contribution "
+                f"fallback will be used, and ML.DRIVER_INSIGHTS.method will say so"
+            ) from exc
 
     @check("CREATE DYNAMIC TABLE privilege")
     def _dt():
+        # A dynamic table must have at least one BASE TABLE; `SELECT 1` is not a
+        # valid definition, so the probe creates a real one to select from.
         db = env("SNOWFLAKE_DATABASE", "TELLTAIL")
         wh = env("SNOWFLAKE_WAREHOUSE", "TELLTAIL_WH")
         q(conn, f"CREATE SCHEMA IF NOT EXISTS {db}._SMOKE")
-        q(conn, f"""CREATE OR REPLACE DYNAMIC TABLE {db}._SMOKE.DT_PROBE
-                    TARGET_LAG = '1 minute' WAREHOUSE = {wh}
-                    AS SELECT 1 AS x""")
-        q(conn, f"DROP DYNAMIC TABLE IF EXISTS {db}._SMOKE.DT_PROBE")
-        q(conn, f"DROP SCHEMA IF EXISTS {db}._SMOKE")
-        return "created and dropped"
+        try:
+            q(conn, f"CREATE OR REPLACE TABLE {db}._SMOKE.BASE (x NUMBER)")
+            q(conn, f"INSERT INTO {db}._SMOKE.BASE VALUES (1)")
+            q(conn, f"""CREATE OR REPLACE DYNAMIC TABLE {db}._SMOKE.DT_PROBE
+                        TARGET_LAG = '1 minute' WAREHOUSE = {wh}
+                        AS SELECT x FROM {db}._SMOKE.BASE""")
+            n = q(conn, f"SELECT COUNT(*) AS n FROM {db}._SMOKE.DT_PROBE")[0]["N"]
+            return f"created, refreshed, {n} row(s) visible"
+        finally:
+            q(conn, f"DROP SCHEMA IF EXISTS {db}._SMOKE CASCADE")
 
     @check("trial credit remaining")
     def _credits():

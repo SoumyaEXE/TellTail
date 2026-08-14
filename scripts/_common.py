@@ -25,17 +25,46 @@ DATA_DIR = REPO / "data"
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
+# Windows consoles default to cp1252, which cannot encode box-drawing or check
+# glyphs — and Python raises UnicodeEncodeError rather than degrading, so a
+# decorative character aborts the build. Try UTF-8 first; if the stream will not
+# take it, fall back to an ASCII glyph set instead of crashing.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+except Exception:  # noqa: BLE001 - older Python, or a stream that is not a TextIO
+    pass
+
+
+def _encodable(s: str) -> bool:
+    enc = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        s.encode(enc)
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
+_UNICODE_OK = _encodable("·✓✗─")
+G = {
+    "dot":  "·" if _UNICODE_OK else "*",
+    "ok":   "✓" if _UNICODE_OK else "+",
+    "bad":  "✗" if _UNICODE_OK else "x",
+    "bar":  "─" if _UNICODE_OK else "-",
+    "ell":  "…" if _UNICODE_OK else "...",
+}
+
 
 def _c(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m" if _USE_COLOR else text
 
 
 def info(msg: str) -> None:
-    print(f"{_c('36', '  ·')} {msg}", flush=True)
+    print(f"{_c('36', '  ' + G['dot'])} {msg}", flush=True)
 
 
 def ok(msg: str) -> None:
-    print(f"{_c('32', '  ✓')} {msg}", flush=True)
+    print(f"{_c('32', '  ' + G['ok'])} {msg}", flush=True)
 
 
 def warn(msg: str) -> None:
@@ -43,7 +72,7 @@ def warn(msg: str) -> None:
 
 
 def fail(msg: str) -> None:
-    print(f"{_c('31', '  ✗')} {msg}", file=sys.stderr, flush=True)
+    print(f"{_c('31', '  ' + G['bad'])} {msg}", file=sys.stderr, flush=True)
 
 
 def die(msg: str, code: int = 1) -> "NoReturn":  # type: ignore[valid-type]
@@ -52,8 +81,9 @@ def die(msg: str, code: int = 1) -> "NoReturn":  # type: ignore[valid-type]
 
 
 def header(msg: str) -> None:
+    bar = G["bar"]
     print()
-    print(_c("1", f"── {msg} " + "─" * max(0, 68 - len(msg))), flush=True)
+    print(_c("1", f"{bar * 2} {msg} " + bar * max(0, 68 - len(msg))), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +343,7 @@ def first_line(stmt: str, width: int = 78) -> str:
     body = re.sub(r"--[^\n]*", " ", stmt)
     body = re.sub(r"/\*.*?\*/", " ", body, flags=re.S)
     body = " ".join(body.split())
-    return body[:width] + ("…" if len(body) > width else "")
+    return body[:width] + (G["ell"] if len(body) > width else "")
 
 
 def execute_script(
@@ -343,11 +373,11 @@ def execute_script(
             with conn.cursor() as cur:
                 cur.execute(stmt)
             dt = time.perf_counter() - t0
-            print(f"  {_c('32', '✓')} {idx:>3}. {label}  {_c('90', f'{dt:6.2f}s')}")
+            print(f"  {_c('32', G['ok'])} {idx:>3}. {label}  {_c('90', f'{dt:6.2f}s')}")
             n_ok += 1
         except Exception as exc:  # noqa: BLE001 - we want the raw driver message
             dt = time.perf_counter() - t0
-            print(f"  {_c('31', '✗')} {idx:>3}. {label}  {_c('90', f'{dt:6.2f}s')}")
+            print(f"  {_c('31', G['bad'])} {idx:>3}. {label}  {_c('90', f'{dt:6.2f}s')}")
             fail(f"      {type(exc).__name__}: {exc}")
             n_fail += 1
             if stop_on_error:
