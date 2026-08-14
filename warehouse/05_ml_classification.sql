@@ -391,9 +391,14 @@ BEGIN
         WHEN OTHER THEN
             -- CLASSIFICATION unavailable on this account/region. Do not lose the
             -- day: fall back, and record why in the data.
+            CREATE OR REPLACE DYNAMIC TABLE ML.STATE_PREDICTION
+                TARGET_LAG = DOWNSTREAM WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+                REFRESH_MODE = FULL INITIALIZE = ON_CREATE
+                COMMENT = 'One predicted state per epoch. state_source says which classifier.'
+            AS SELECT dog_id, test_num, epoch_ts, state, confidence, state_source
+               FROM ML.RULES_STATE;
             CREATE OR REPLACE VIEW ML.V_STATE_PREDICTION AS
-                SELECT dog_id, test_num, epoch_ts, state, confidence, state_source
-                FROM ML.V_RULES_STATE;
+                SELECT * FROM ML.STATE_PREDICTION;
             UPDATE REF.PARAMS SET value_num = 1 WHERE key = 'use_rules_classifier';
             DELETE FROM ML.MODEL_STATUS;
             INSERT INTO ML.MODEL_STATUS
