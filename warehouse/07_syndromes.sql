@@ -570,7 +570,27 @@ DECLARE
                  CASE v.variant WHEN 'loose' THEN 1 WHEN 'tuned' THEN 2 ELSE 3 END;
     stmt STRING;
     n    NUMBER DEFAULT 0;
+    bad  NUMBER DEFAULT 0;
+    err  STRING;
+    code STRING;
+    var  STRING;
 BEGIN
+    -- Which variants ran, and which the engine refused. Every one of these
+    -- eighteen patterns succeeds when run on its own; executing all eighteen
+    -- inside a single procedure intermittently trips a Snowflake internal
+    -- error (370001, "SQL execution internal error"), and an unhandled one
+    -- abandons the sweep partway. The run still REPORTS success, so a
+    -- truncated curve looks like a real result — the sensitivity curve is an
+    -- argument about where the quantifier floors should sit, and silently
+    -- dropping most of it would make that argument from missing data.
+    CREATE OR REPLACE TABLE MARTS.SWEEP_STATUS (
+        syndrome_code STRING,
+        variant       STRING,
+        ran_ok        BOOLEAN,
+        error_text    STRING,
+        ran_at        TIMESTAMP_NTZ
+    );
+
     CREATE OR REPLACE TABLE MARTS.SYNDROME_SENSITIVITY (
         syndrome_code STRING,
         variant       STRING,
@@ -586,6 +606,8 @@ BEGIN
     );
 
     FOR r IN cur_var DO
+        code := r.syndrome_code;
+        var  := r.variant;
         stmt := '
             INSERT INTO MARTS.SYNDROME_SENSITIVITY
             SELECT ''' || r.syndrome_code || ''',
@@ -608,8 +630,20 @@ BEGIN
                 PATTERN ( ' || r.pattern_text || ' )
                 DEFINE ' || r.define_text || '
             )';
-        EXECUTE IMMEDIATE :stmt;
-        n := n + 1;
+        BEGIN
+            EXECUTE IMMEDIATE :stmt;
+            n := n + 1;
+            INSERT INTO MARTS.SWEEP_STATUS
+                SELECT :code, :var, TRUE, NULL,
+                       CURRENT_TIMESTAMP()::TIMESTAMP_NTZ;
+        EXCEPTION
+            WHEN OTHER THEN
+                err := SQLERRM;
+                bad := bad + 1;
+                INSERT INTO MARTS.SWEEP_STATUS
+                    SELECT :code, :var, FALSE, :err,
+                           CURRENT_TIMESTAMP()::TIMESTAMP_NTZ;
+        END;
     END FOR;
 
     -- Apply the same gap guard the tuned path uses, so the curve compares like
@@ -617,7 +651,9 @@ BEGIN
     DELETE FROM MARTS.SYNDROME_SENSITIVITY WHERE duration_s >= n_epochs * 2;
 
     RETURN 'SYNDROME_SENSITIVITY: ' || :n || ' pattern variants run, '
-        || (SELECT COUNT(*) FROM MARTS.SYNDROME_SENSITIVITY) || ' matches';
+        || (SELECT COUNT(*) FROM MARTS.SYNDROME_SENSITIVITY) || ' matches'
+        || IFF(:bad > 0,
+               ' — ' || :bad || ' variant(s) FAILED, see MARTS.SWEEP_STATUS', '');
 END;
 $$;
 
