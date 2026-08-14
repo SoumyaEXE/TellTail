@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""
+Deploy the dashboard into the warehouse.
+
+    python scripts/deploy_streamlit.py
+    python scripts/deploy_streamlit.py --name TELLTAIL_DEV
+
+Ships streamlit_app.py AND environment.yml to MARTS.APP_STAGE, then creates the
+Streamlit object pointing at them. It refuses to deploy without environment.yml,
+because a SiS app missing it fails at import time with a ModuleNotFoundError for
+plotly that reproduces nowhere else.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _common import (  # noqa: E402
+    WAREHOUSE_DIR,
+    connect,
+    die,
+    env,
+    header,
+    info,
+    load_env,
+    ok,
+    q,
+    warn,
+)
+
+STAGE = "MARTS.APP_STAGE"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Deploy the Streamlit app to Snowflake.")
+    ap.add_argument("--name", default="TELLTAIL")
+    ap.add_argument("--schema", default="MARTS")
+    args = ap.parse_args()
+
+    load_env()
+    app = WAREHOUSE_DIR / "streamlit_app.py"
+    envyml = WAREHOUSE_DIR / "environment.yml"
+
+    if not app.exists():
+        die(f"{app} not found")
+    if not envyml.exists():
+        die(f"{envyml} not found. Streamlit in Snowflake needs it next to the app "
+            f"or plotly will ModuleNotFoundError in SiS only.")
+
+    db = env("SNOWFLAKE_DATABASE", "TELLTAIL")
+    wh = env("SNOWFLAKE_WAREHOUSE", "TELLTAIL_WH")
+    conn = connect()
+
+    try:
+        header("Uploading to " + STAGE)
+        with conn.cursor() as cur:
+            for f in (app, envyml):
+                cur.execute(
+                    f"PUT 'file://{f.resolve().as_posix()}' @{STAGE} "
+                    f"AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
+                )
+                for r in cur.fetchall():
+                    print(f"    {r[0]:<24} {r[6]}")
+        ok("app + environment.yml staged")
+
+        header(f"Creating STREAMLIT {db}.{args.schema}.{args.name}")
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                CREATE OR REPLACE STREAMLIT {db}.{args.schema}.{args.name}
+                    ROOT_LOCATION = '@{db}.{STAGE}'
+                    MAIN_FILE     = 'streamlit_app.py'
+                    QUERY_WAREHOUSE = {wh}
+                    TITLE = 'TELLTAIL — canine syndrome detection'
+                    COMMENT = 'Nine tabs. Reads only tables; every Cortex call is cached upstream.'
+            """)
+        ok("Streamlit object created")
+
+        rows = q(conn, f"SHOW STREAMLITS LIKE '{args.name}' IN SCHEMA {db}.{args.schema}")
+        if rows:
+            r = rows[0]
+            url_id = r.get("url_id") or r.get("URL_ID")
+            header("Open it")
+            print(f"  Snowsight -> Projects -> Streamlit -> {args.name}")
+            if url_id:
+                print(f"  url_id: {url_id}")
+
+        header("Preflight: does the app have data to render?")
+        checks = [
+            ("MARTS.PACK_STATUS",         "tab 1 (The Pack)"),
+            ("MARTS.EPOCH_STATES",        "tabs 2, 3 (Live Collar, Ethogram)"),
+            ("MARTS.SYNDROME_MATCHES",    "tab 4 (Syndromes) — THE tab"),
+            ("MARTS.SYNDROME_MATCH_ROWS", "tab 4 symbol highlighting (the hero image)"),
+            ("MARTS.SYNDROME_SENSITIVITY","tab 4 sensitivity curve"),
+            ("MARTS.DOG_DEVIATION",       "tab 5 (Baselines)"),
+            ("AI.VET_NOTES",              "tab 6 (Vet Note)"),
+            ("ML.DRIVER_INSIGHTS",        "tab 7 (Drivers)"),
+            ("ML.CONFUSION_MATRIX",       "tab 7 confusion matrix"),
+            ("REF.AAC_OUTCOMES",          "tab 8 (Shelter Reality) — run austin_sync.py"),
+            ("ORACLE.PUBLISH_QUEUE",      "tab 9 (Pipeline) publish log"),
+        ]
+        empty = []
+        for table, what in checks:
+            try:
+                n = int(list(q(conn, f"SELECT COUNT(*) AS n FROM {table}")[0].values())[0])
+                mark = "ok " if n else "EMPTY"
+                print(f"  [{mark}] {table:<28} {n:>9,}   {what}")
+                if not n:
+                    empty.append((table, what))
+            except Exception as exc:  # noqa: BLE001
+                print(f"  [MISS] {table:<28} {'—':>9}   {what}")
+                empty.append((table, f"{what} ({str(exc).splitlines()[0][:60]})"))
+
+        if empty:
+            print()
+            warn(f"{len(empty)} source(s) are empty; those tabs will render a placeholder")
+            info("the usual order is: load_raw.py -> run_sql.py --all -> replay.py "
+                 "-> austin_sync.py")
+        else:
+            print()
+            ok("every tab has data")
+        return 0
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
