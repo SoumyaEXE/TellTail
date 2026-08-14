@@ -110,8 +110,19 @@ GROUP BY state;
 -- classifier — every threshold is a row in REF.PARAMS, on screen, tunable, and
 -- labelled state_source='RULES' wherever it appears. The syndromes are the
 -- submission, not the classifier; losing the model must not lose the day.
+--
+-- A dynamic table rather than a view for the same reason STAGING.EPOCH_ALL is
+-- one: ML.STATE_PREDICTION is a dynamic table, and a dynamic table cannot
+-- reach another one through a view. TARGET_LAG = DOWNSTREAM — it is fresh when
+-- its reader needs it.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW ML.V_RULES_STATE AS
+CREATE OR REPLACE DYNAMIC TABLE ML.RULES_STATE
+    TARGET_LAG   = DOWNSTREAM
+    WAREHOUSE    = ${SNOWFLAKE_WAREHOUSE}
+    REFRESH_MODE = FULL
+    INITIALIZE   = ON_CREATE
+    COMMENT      = 'Transparent threshold ethogram. Every threshold is a row in REF.PARAMS.'
+AS
 SELECT
     e.dog_id, e.test_num, e.epoch_ts,
     CASE
@@ -140,8 +151,12 @@ SELECT
     END                                                               AS state,
     NULL::FLOAT                                                       AS confidence,
     'RULES'::STRING                                                   AS state_source
-FROM STAGING.V_EPOCH_ALL e
+FROM STAGING.EPOCH_ALL e
 CROSS JOIN REF.V_PARAM p;
+
+-- Compatibility lens for readers that are not dynamic tables.
+CREATE OR REPLACE VIEW ML.V_RULES_STATE AS
+SELECT * FROM ML.RULES_STATE;
 
 -- ---------------------------------------------------------------------------
 -- FEATURE SEPARATION — our own answer to "what does the signal actually carry?"
@@ -258,9 +273,14 @@ BEGIN
     END IF;
 
     IF (:use_rules = 1) THEN
+        CREATE OR REPLACE DYNAMIC TABLE ML.STATE_PREDICTION
+            TARGET_LAG = DOWNSTREAM WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+            REFRESH_MODE = FULL INITIALIZE = ON_CREATE
+            COMMENT = 'One predicted state per epoch. state_source says which classifier.'
+        AS SELECT dog_id, test_num, epoch_ts, state, confidence, state_source
+           FROM ML.RULES_STATE;
         CREATE OR REPLACE VIEW ML.V_STATE_PREDICTION AS
-            SELECT dog_id, test_num, epoch_ts, state, confidence, state_source
-            FROM ML.V_RULES_STATE;
+            SELECT * FROM ML.STATE_PREDICTION;
         DELETE FROM ML.MODEL_STATUS;
         INSERT INTO ML.MODEL_STATUS
             SELECT 'RULES', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, :n_train, FALSE,
