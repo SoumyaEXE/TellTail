@@ -261,6 +261,9 @@ DECLARE
     use_rules  NUMBER  DEFAULT 0;
     n_train    NUMBER  DEFAULT 0;
     msg        STRING  DEFAULT '';
+    -- SQLERRM reads fine inside an expression assignment but is not a valid
+    -- identifier inside a DML statement. Park it in a variable and bind that.
+    err        STRING  DEFAULT '';
 BEGIN
     SELECT COALESCE(value_num, 0) INTO :use_rules
       FROM REF.PARAMS WHERE key = 'use_rules_classifier';
@@ -334,11 +337,12 @@ BEGIN
             UPDATE ML.MODEL_STATUS SET accessors_ok = TRUE, accessor_error = NULL;
         EXCEPTION
             WHEN OTHER THEN
+                err := SQLERRM;
                 CREATE OR REPLACE TABLE ML.MODEL_EVAL (
                     metric STRING, value FLOAT, note STRING);
                 UPDATE ML.MODEL_STATUS
                    SET accessors_ok   = FALSE,
-                       accessor_error = SQLERRM;
+                       accessor_error = :err;
         END;
 
         -- Inference as a node in the DAG, not a lens over one. A dynamic table
@@ -411,10 +415,11 @@ BEGIN
             CREATE OR REPLACE VIEW ML.V_STATE_PREDICTION AS
                 SELECT * FROM ML.STATE_PREDICTION;
             UPDATE REF.PARAMS SET value_num = 1 WHERE key = 'use_rules_classifier';
+            err := SQLERRM;
             DELETE FROM ML.MODEL_STATUS;
             INSERT INTO ML.MODEL_STATUS
                 SELECT 'RULES (fallback)', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ,
-                       :n_train, FALSE, SQLERRM;
+                       :n_train, FALSE, :err;
             msg := 'FALLBACK to RULES classifier — ML.CLASSIFICATION failed: '
                 || SQLERRM || ' (recorded in REF.PARAMS.use_rules_classifier=1)';
     END;
