@@ -274,6 +274,13 @@ BEGIN
 END;
 $$;
 
+-- Placeholder so STAGING.V_EPOCH_ALL below can compile before the procedure has
+-- ever run. LIKE copies the dynamic table's column list, which keeps the two
+-- shapes in lockstep automatically — add a feature above and the bulk table
+-- follows without a second edit. SP_BUILD_BULK_FEATURES then CREATE OR REPLACEs
+-- it with the real contents, selecting the same columns in the same order.
+CREATE TABLE IF NOT EXISTS STAGING.EPOCH_FEATURES_BULK LIKE STAGING.EPOCH_FEATURES;
+
 -- The union both the classifier and the pattern layer read. Live rows win on
 -- collision because they are the ones the demo is watching.
 CREATE OR REPLACE VIEW STAGING.V_EPOCH_ALL AS
