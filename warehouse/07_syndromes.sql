@@ -176,6 +176,11 @@ FROM mr;
 --
 --   PATTERN ( burst+ recover{5,} burst2{1,2} recover2{8,} )
 --
+-- burst/recover match REF.ETHOGRAM.activity_class, not state: recovery from
+-- exertion means the dog stopped moving, and it stands or sits long before it
+-- lies down. Defined as REST alone this pattern was unsatisfiable — TROT ->
+-- REST occurs zero times in 106k epochs.
+--
 -- Why: total activity minutes are IDENTICAL. The same minutes are redistributed
 -- into shorter bursts with progressively longer recoveries. Cardiac and
 -- respiratory presentations look exactly like this and are invisible to a daily
@@ -183,7 +188,8 @@ FROM mr;
 -- ===========================================================================
 CREATE OR REPLACE VIEW MARTS.V_SYNDROME_S3 AS
 WITH src AS (
-    SELECT dog_id, test_num, epoch_ts, state FROM MARTS.V_SYNDROME_INPUT
+    SELECT dog_id, test_num, epoch_ts, state, activity_class
+    FROM MARTS.V_SYNDROME_INPUT
 ),
 mr AS (
     SELECT * FROM src
@@ -203,10 +209,10 @@ mr AS (
         AFTER MATCH SKIP PAST LAST ROW
         PATTERN ( burst+ recover{5,} burst2{1,2} recover2{8,} )
         DEFINE
-            burst    AS state IN ('TROT','GALLOP'),
-            recover  AS state IN ('REST','SIT','STAND'),
-            burst2   AS state IN ('TROT','GALLOP'),
-            recover2 AS state IN ('REST','SIT','STAND')
+            burst    AS activity_class = 'FAST_GAIT',
+            recover  AS activity_class = 'STATIONARY',
+            burst2   AS activity_class = 'FAST_GAIT',
+            recover2 AS activity_class = 'STATIONARY'
     )
 )
 SELECT

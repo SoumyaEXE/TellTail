@@ -249,10 +249,15 @@ LEFT JOIN REF.ETHOGRAM e ON e.state = l.state_raw;
 -- The exact row set the pattern layer scans. Narrow on purpose: MATCH_RECOGNIZE
 -- reads every column of every row in the partition, so carrying 25 features
 -- through it costs real time for no benefit.
+-- The single input every syndrome pattern reads. activity_class comes along so
+-- a pattern can match "stopped moving" without spelling out which three states
+-- that is; see the column's note in REF.ETHOGRAM for why that matters.
 CREATE OR REPLACE VIEW MARTS.V_SYNDROME_INPUT AS
-SELECT dog_id, test_num, epoch_ts, state, quality, is_model
-FROM MARTS.EPOCH_STATES
-WHERE state <> 'UNKNOWN';
+SELECT s.dog_id, s.test_num, s.epoch_ts, s.state, s.quality, s.is_model,
+       COALESCE(e.activity_class, 'OTHER') AS activity_class
+FROM MARTS.EPOCH_STATES s
+LEFT JOIN REF.ETHOGRAM e ON e.state = s.state
+WHERE s.state <> 'UNKNOWN';
 
 -- ---------------------------------------------------------------------------
 -- Behavioural Markov chain. Which behaviour follows which, per dog.

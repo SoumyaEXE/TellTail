@@ -176,6 +176,19 @@ def compile_pattern(pattern_text: str, define_text: str) -> CompiledPattern:
     # same value (itch and itch2 both = 'SCRATCH') therefore share a character,
     # which is correct: a row satisfies both, and the regex decides which symbol
     # consumes it exactly as the matcher would.
+    # One column per pattern, enforced. The encoder gives each row a single
+    # character, so a pattern whose symbols test two different columns cannot be
+    # represented faithfully — one column would silently win and the other's
+    # symbols would match rows they should not. S3 matches activity_class and
+    # every other pattern matches state; mixing them inside one pattern is a
+    # modelling error this refuses rather than mis-simulates.
+    cols = {col for col, _ in defines.values()}
+    if len(cols) > 1:
+        raise PatternError(
+            f"pattern mixes DEFINE columns {sorted(cols)}; this simulator "
+            f"encodes one row as one character and cannot model that"
+        )
+
     values = sorted({v for _, vs in defines.values() for v in vs})
     val_to_char = {v: chr(_ENCODE_BASE + i) for i, v in enumerate(values)}
     sym_to_chars = {var: frozenset(val_to_char[v] for v in vs)
