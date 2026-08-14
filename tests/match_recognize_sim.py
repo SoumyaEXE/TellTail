@@ -72,11 +72,16 @@ _DEFINE_RE = re.compile(
     (?P<var>[A-Za-z_][A-Za-z0-9_]*)
     \s+AS\s+
     (?P<col>[A-Za-z_][A-Za-z0-9_]*)
-    \s*=\s*
-    '(?P<val>[^']*)'
+    \s*
+    (?:
+        =\s*'(?P<val>[^']*)'                 # col = 'LITERAL'
+      | IN\s*\(\s*(?P<vals>'[^)]*')\s*\)     # col IN ('A','B','C')
+    )
     """,
     re.VERBOSE | re.IGNORECASE,
 )
+
+_IN_LIST_RE = re.compile(r"'([^']*)'")
 
 # Symbols are encoded as single characters so the whole pattern becomes a plain
 # regex over a string. Private-use Unicode keeps them clear of any real value.
@@ -87,16 +92,29 @@ class PatternError(ValueError):
     """A pattern or DEFINE clause this simulator refuses to guess about."""
 
 
-def parse_define(define_text: str) -> dict[str, tuple[str, str]]:
-    """'a AS state = ''REST'', b AS state = ''SHAKE''' -> {a: (state, REST), ...}
+def parse_define(define_text: str) -> dict[str, tuple[str, frozenset[str]]]:
+    """'a AS state = ''REST'', b AS state IN (''SIT'',''STAND'')'
+        -> {a: (state, {REST}), b: (state, {SIT, STAND})}
 
     Accepts both SQL-escaped ('') and plain ('') quoting, because the catalogue
     stores the escaped form and hand-written SQL uses the plain one.
+
+    Both `= 'literal'` and `IN (...)` are modelled. The set form is not a
+    convenience: S3's `recover` has to mean "stopped moving" rather than "lying
+    down" — TROT -> REST never occurs — and S1's onset posture spans three
+    states. A simulator that only understood equality would have to refuse the
+    real catalogue, and a refusing simulator validates nothing.
     """
     text = define_text.replace("''", "'")
-    out: dict[str, tuple[str, str]] = {}
+    out: dict[str, tuple[str, frozenset[str]]] = {}
     for m in _DEFINE_RE.finditer(text):
-        out[m.group("var")] = (m.group("col").lower(), m.group("val"))
+        if m.group("val") is not None:
+            vals = frozenset({m.group("val")})
+        else:
+            vals = frozenset(_IN_LIST_RE.findall(m.group("vals")))
+        if not vals:
+            raise PatternError(f"empty value set for {m.group('var')!r}")
+        out[m.group("var")] = (m.group("col").lower(), vals)
     if not out:
         raise PatternError(f"no DEFINE bindings parsed from: {define_text!r}")
 
@@ -107,7 +125,7 @@ def parse_define(define_text: str) -> dict[str, tuple[str, str]]:
     if residue:
         raise PatternError(
             f"DEFINE contains predicates this simulator does not model: {residue!r}. "
-            f"Only `var AS col = 'literal'` is supported."
+            f"Only `var AS col = 'literal'` and `var AS col IN (...)` are supported."
         )
     return out
 
