@@ -341,7 +341,15 @@ BEGIN
                        accessor_error = SQLERRM;
         END;
 
-        CREATE OR REPLACE VIEW ML.V_STATE_PREDICTION AS
+        -- Inference as a node in the DAG, not a lens over one. A dynamic table
+        -- may call the model directly (probed against this account before
+        -- relying on it), which is what lets MARTS.EPOCH_STATES read predicted
+        -- states without a view in between.
+        CREATE OR REPLACE DYNAMIC TABLE ML.STATE_PREDICTION
+            TARGET_LAG = DOWNSTREAM WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+            REFRESH_MODE = FULL INITIALIZE = ON_CREATE
+            COMMENT = 'One predicted state per epoch. state_source says which classifier.'
+        AS
             SELECT
                 e.dog_id, e.test_num, e.epoch_ts,
                 pred:class::STRING                                      AS state,
@@ -379,9 +387,12 @@ BEGIN
                         'NECK_DOMINANCE', f.neck_dominance,
                         'ACTIVITY_INDEX', f.activity_index
                     ))                                                  AS pred
-                FROM STAGING.V_EPOCH_ALL f
+                FROM STAGING.EPOCH_ALL f
                 WHERE f.neck_back_corr IS NOT NULL
             ) e;
+
+        CREATE OR REPLACE VIEW ML.V_STATE_PREDICTION AS
+            SELECT * FROM ML.STATE_PREDICTION;
 
         msg := 'MODEL trained on ' || :n_train || ' epochs from '
             || (SELECT COUNT(*) FROM (SELECT DISTINCT dog_id FROM ML.V_LABELLED_EPOCHS

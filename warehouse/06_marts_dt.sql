@@ -85,10 +85,14 @@ WITH base AS (
             1, 0)                                    AS is_plain_loco,
         p.o AS prm,
         nl.has_shake, nl.has_scratch
-    FROM STAGING.V_EPOCH_ALL e
+    -- Dynamic tables, not the compatibility views over them: a dynamic table
+    -- cannot read a view that contains one. REF.V_PARAM and
+    -- MARTS.V_NECK_LABELS_PRESENT stay views because they sit over plain
+    -- tables, which is allowed.
+    FROM STAGING.EPOCH_ALL e
     CROSS JOIN REF.V_PARAM p
     CROSS JOIN MARTS.V_NECK_LABELS_PRESENT nl
-    LEFT JOIN ML.V_STATE_PREDICTION pr
+    LEFT JOIN ML.STATE_PREDICTION pr
            ON pr.dog_id   = e.dog_id
           AND pr.test_num = e.test_num
           AND pr.epoch_ts = e.epoch_ts
