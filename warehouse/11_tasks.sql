@@ -56,6 +56,12 @@ USE SCHEMA MARTS;
 -- ---------------------------------------------------------------------------
 -- Root. Cheap on purpose: it is a heartbeat that anchors the DAG, not work.
 -- ---------------------------------------------------------------------------
+-- EVERY TASK LIVES IN MARTS, including the ones whose work belongs to ML, AI
+-- and ORACLE. Snowflake refuses a cross-schema DAG outright — "Cannot have
+-- predecessor T_SYNDROMES from a different schema" — so the choice is one
+-- schema or no DAG. The procedures each task calls are fully qualified and
+-- still live in their own schemas; only the scheduling objects are gathered
+-- here, and the task names keep saying what they do.
 CREATE OR REPLACE TASK MARTS.T_ROOT
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
     SCHEDULE  = '2 minute'
@@ -70,53 +76,53 @@ AS
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE TASK MARTS.T_SYNDROMES
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     MARTS.T_ROOT
     COMMENT   = 'MATCH_RECOGNIZE over the epoch state sequence. Six clinical patterns.'
+    AFTER     MARTS.T_ROOT
 AS
     CALL MARTS.SP_BUILD_SYNDROMES();
 
 CREATE OR REPLACE TASK MARTS.T_MATCH_ROWS
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     MARTS.T_SYNDROMES
     COMMENT   = 'ALL ROWS PER MATCH + CLASSIFIER(): per-epoch symbols for the timeline.'
+    AFTER     MARTS.T_SYNDROMES
 AS
     CALL MARTS.SP_BUILD_MATCH_ROWS();
 
 -- ---------------------------------------------------------------------------
 -- Time series. Snapshot first, then boundary, then the two ML functions.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TASK ML.T_SNAPSHOT
+CREATE OR REPLACE TASK MARTS.T_SNAPSHOT
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     MARTS.T_SYNDROMES
     COMMENT   = 'Per-minute activity history. MERGE, so a re-run replaces rather than duplicates.'
+    AFTER     MARTS.T_SYNDROMES
 AS
     CALL ML.SP_SNAPSHOT_ACTIVITY();
 
-CREATE OR REPLACE TASK ML.T_BOUNDARY
+CREATE OR REPLACE TASK MARTS.T_BOUNDARY
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     ML.T_SNAPSHOT
     COMMENT   = 'Fix the single train/detect split point, so the two views cannot disagree.'
+    AFTER     MARTS.T_SNAPSHOT
 AS
     CALL ML.SP_SET_BOUNDARY();
 
-CREATE OR REPLACE TASK ML.T_FORECAST
+CREATE OR REPLACE TASK MARTS.T_FORECAST
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     ML.T_BOUNDARY
     COMMENT   = 'ML.FORECAST on the per-dog activity index. Trains on ts < boundary.'
+    AFTER     MARTS.T_BOUNDARY
 AS
     CALL ML.SP_RUN_FORECAST();
 
-CREATE OR REPLACE TASK ML.T_ANOMALY
+CREATE OR REPLACE TASK MARTS.T_ANOMALY
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     ML.T_FORECAST
     COMMENT   = 'ML.ANOMALY_DETECTION. Detects on ts >= boundary. No window overlap.'
+    AFTER     MARTS.T_FORECAST
 AS
     CALL ML.SP_RUN_ANOMALY();
 
-CREATE OR REPLACE TASK ML.T_DRIVERS
+CREATE OR REPLACE TASK MARTS.T_DRIVERS
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     ML.T_ANOMALY
     COMMENT   = 'TOP_INSIGHTS over the deviation metric. Produces a finding, not a chart.'
+    AFTER     MARTS.T_ANOMALY
 AS
     CALL ML.SP_RUN_TOP_INSIGHTS();
 
@@ -130,31 +136,31 @@ AS
 -- triple the chance of an unattended overnight run walking into the trial's
 -- daily AI Function credit cap.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TASK AI.T_NOTES
+CREATE OR REPLACE TASK MARTS.T_NOTES
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     ML.T_BOUNDARY
     COMMENT   = 'AI_COMPLETE: SOAP handoff notes. Capped, deduped on the finding key.'
+    AFTER     MARTS.T_BOUNDARY
 AS
     CALL AI.SP_GENERATE_NOTES();
 
-CREATE OR REPLACE TASK AI.T_TRIAGE
+CREATE OR REPLACE TASK MARTS.T_TRIAGE
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     AI.T_NOTES
     COMMENT   = 'AI_CLASSIFY over the cached notes, not over the raw evidence.'
+    AFTER     MARTS.T_NOTES
 AS
     CALL AI.SP_GENERATE_TRIAGE();
 
-CREATE OR REPLACE TASK AI.T_BRIEF
+CREATE OR REPLACE TASK MARTS.T_BRIEF
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     AI.T_TRIAGE
     COMMENT   = 'AI_AGG: one pack-wide brief over every cached note.'
+    AFTER     MARTS.T_TRIAGE
 AS
     CALL AI.SP_GENERATE_PACK_BRIEF();
 
-CREATE OR REPLACE TASK ORACLE.T_ATTEST
+CREATE OR REPLACE TASK MARTS.T_ATTEST
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     AI.T_BRIEF
     COMMENT   = 'Stage findings for the bridge. Snowflake queues; it never signs.'
+    AFTER     MARTS.T_BRIEF
 AS
     CALL ORACLE.SP_ENQUEUE_ATTESTATIONS();
 
@@ -163,15 +169,15 @@ AS
 -- suspended, and resuming the root first would fire a run against a DAG that
 -- is only half awake.
 -- ---------------------------------------------------------------------------
-ALTER TASK ORACLE.T_ATTEST    RESUME;
-ALTER TASK AI.T_BRIEF         RESUME;
-ALTER TASK AI.T_TRIAGE        RESUME;
-ALTER TASK AI.T_NOTES         RESUME;
-ALTER TASK ML.T_DRIVERS       RESUME;
-ALTER TASK ML.T_ANOMALY       RESUME;
-ALTER TASK ML.T_FORECAST      RESUME;
-ALTER TASK ML.T_BOUNDARY      RESUME;
-ALTER TASK ML.T_SNAPSHOT      RESUME;
+ALTER TASK MARTS.T_ATTEST    RESUME;
+ALTER TASK MARTS.T_BRIEF         RESUME;
+ALTER TASK MARTS.T_TRIAGE        RESUME;
+ALTER TASK MARTS.T_NOTES         RESUME;
+ALTER TASK MARTS.T_DRIVERS       RESUME;
+ALTER TASK MARTS.T_ANOMALY       RESUME;
+ALTER TASK MARTS.T_FORECAST      RESUME;
+ALTER TASK MARTS.T_BOUNDARY      RESUME;
+ALTER TASK MARTS.T_SNAPSHOT      RESUME;
 ALTER TASK MARTS.T_MATCH_ROWS RESUME;
 ALTER TASK MARTS.T_SYNDROMES  RESUME;
 ALTER TASK MARTS.T_ROOT       RESUME;
@@ -192,8 +198,12 @@ SELECT
     latest_data_timestamp,
     scheduling_state:state::STRING          AS state,
     scheduling_state:reason_message::STRING AS reason
-FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY())
-QUALIFY ROW_NUMBER() OVER (PARTITION BY name ORDER BY data_timestamp DESC) = 1;
+-- DYNAMIC_TABLES(), not DYNAMIC_TABLE_REFRESH_HISTORY(). The lag columns this
+-- view is entirely about — maximum_lag_sec, mean_lag_sec, latest_data_timestamp,
+-- scheduling_state — live only on the former, which already returns one row per
+-- dynamic table. The history function reports one row per REFRESH and carries
+-- target_lag_sec but none of the rest.
+FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES());
 
 CREATE OR REPLACE VIEW MARTS.V_TASK_HISTORY AS
 SELECT

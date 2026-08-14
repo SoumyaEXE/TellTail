@@ -386,6 +386,25 @@ $$;
 -- The dumbbell chart on the Baselines tab: current index -> projected index,
 -- so who is declining reads at a glance.
 -- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- Placeholders so the reporting views below compile on a cold warehouse.
+--
+-- The procedures above create these, and the bootstrap calls procedures only
+-- after every statement in this file has run — so on a fresh account the very
+-- first view that reads a forecast fails before any of them exists. Identical
+-- shapes to the ones the procedures' own exception handlers declare, and
+-- IF NOT EXISTS so a rebuild never discards real forecasts.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ML.ACTIVITY_FORECAST (
+    dog_id NUMBER, forecast_ts TIMESTAMP_NTZ, forecast FLOAT,
+    lower_bound FLOAT, upper_bound FLOAT, generated_at TIMESTAMP_NTZ);
+
+CREATE TABLE IF NOT EXISTS ML.ACTIVITY_ANOMALIES (
+    dog_id NUMBER, anomaly_ts TIMESTAMP_NTZ, observed FLOAT, forecast FLOAT,
+    lower_bound FLOAT, upper_bound FLOAT, is_anomaly BOOLEAN,
+    percentile FLOAT, distance FLOAT, is_synthetic BOOLEAN,
+    generated_at TIMESTAMP_NTZ);
+
 CREATE OR REPLACE VIEW ML.V_TRAJECTORY AS
 WITH cur AS (
     SELECT dog_id, AVG(activity_index) AS current_index
