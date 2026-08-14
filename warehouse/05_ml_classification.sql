@@ -144,6 +144,92 @@ FROM STAGING.V_EPOCH_ALL e
 CROSS JOIN REF.V_PARAM p;
 
 -- ---------------------------------------------------------------------------
+-- FEATURE SEPARATION — our own answer to "what does the signal actually carry?"
+--
+-- This exists because SHOW_FEATURE_IMPORTANCE does not run on this account
+-- (see the accessor block in SP_TRAIN_STATE_MODEL). Rather than ship a blank
+-- panel, compute the ranking directly: a one-way ANOVA F-ratio per feature
+-- over the labelled epochs — between-class variance of the class means divided
+-- by the mean within-class variance.
+--
+-- It answers a slightly different question than a tree model's split-gain
+-- importance: this is how well a feature separates the ethogram states ON ITS
+-- OWN, ignoring what the model chose to lean on given correlated alternatives.
+-- Stated plainly on the dashboard rather than passed off as the model's.
+--
+-- Unpivoting by name keeps this honest: add a feature to EPOCH_FEATURES and it
+-- must be added here too, so nothing gets silently ranked or silently omitted.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW ML.V_FEATURE_SEPARATION AS
+WITH long AS (
+    SELECT state, f.key::STRING AS feature, f.value::FLOAT AS val
+    FROM ML.V_LABELLED_EPOCHS e,
+    LATERAL FLATTEN(input => OBJECT_CONSTRUCT(
+        'NECK_BACK_CORR',  e.neck_back_corr,
+        'NECK_DOMINANCE',  e.neck_dominance,
+        'VM_NECK_MEAN',    e.vm_neck_mean,
+        'VM_NECK_STD',     e.vm_neck_std,
+        'VM_NECK_RANGE',   e.vm_neck_range,
+        'ENERGY_NECK',     e.energy_neck,
+        'SMA_NECK',        e.sma_neck,
+        'JERK_NECK_MEAN',  e.jerk_neck_mean,
+        'JERK_NECK_STD',   e.jerk_neck_std,
+        'ZCR_NECK',        e.zcr_neck,
+        'VM_BACK_MEAN',    e.vm_back_mean,
+        'VM_BACK_STD',     e.vm_back_std,
+        'SMA_BACK',        e.sma_back,
+        'ENERGY_BACK',     e.energy_back,
+        'GYRO_NECK_MEAN',  e.gyro_neck_mean,
+        'GYRO_BACK_MEAN',  e.gyro_back_mean,
+        'YAW_MEAN',        e.yaw_mean,
+        'YAW_ABS_MEAN',    e.yaw_abs_mean,
+        'YAW_CONSISTENCY', e.yaw_consistency,
+        'PITCH_NECK_MEAN', e.pitch_neck_mean,
+        'PITCH_VAR',       e.pitch_var,
+        'ROLL_NECK_MEAN',  e.roll_neck_mean,
+        'ROLL_VAR',        e.roll_var,
+        'PITCH_BACK_MEAN', e.pitch_back_mean,
+        'ACTIVITY_INDEX',  e.activity_index
+    )) f
+    WHERE f.value IS NOT NULL
+),
+per_class AS (
+    SELECT feature, state, COUNT(*) AS n, AVG(val) AS class_mean,
+           VARIANCE_POP(val) AS class_var
+    FROM long GROUP BY feature, state
+),
+grand AS (
+    SELECT feature, AVG(val) AS grand_mean, COUNT(*) AS n_total
+    FROM long GROUP BY feature
+)
+SELECT
+    c.feature,
+    -- between-class variance, weighted by class size
+    SUM(c.n * POWER(c.class_mean - g.grand_mean, 2)) / NULLIF(COUNT(*) - 1, 0)  AS between_var,
+    -- pooled within-class variance
+    SUM(c.n * c.class_var) / NULLIF(SUM(c.n) - COUNT(*), 0)                     AS within_var,
+    (SUM(c.n * POWER(c.class_mean - g.grand_mean, 2)) / NULLIF(COUNT(*) - 1, 0))
+      / NULLIF(SUM(c.n * c.class_var) / NULLIF(SUM(c.n) - COUNT(*), 0), 0)      AS f_ratio,
+    COUNT(*)                                                                    AS n_classes,
+    SUM(c.n)                                                                    AS n_epochs
+FROM per_class c
+JOIN grand g ON g.feature = c.feature
+GROUP BY c.feature;
+
+-- ---------------------------------------------------------------------------
+-- Did the model train, and did its introspection accessors work? A column,
+-- not a comment: the dashboard reads this instead of guessing why a panel is
+-- empty.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ML.MODEL_STATUS (
+    classifier      STRING,
+    trained_at      TIMESTAMP_NTZ,
+    n_train         NUMBER,
+    accessors_ok    BOOLEAN,
+    accessor_error  STRING
+);
+
+-- ---------------------------------------------------------------------------
 -- Train, evaluate, and pick a prediction source.
 --
 -- The procedure decides which of the two classifiers backs
@@ -175,6 +261,10 @@ BEGIN
         CREATE OR REPLACE VIEW ML.V_STATE_PREDICTION AS
             SELECT dog_id, test_num, epoch_ts, state, confidence, state_source
             FROM ML.V_RULES_STATE;
+        DELETE FROM ML.MODEL_STATUS;
+        INSERT INTO ML.MODEL_STATUS
+            SELECT 'RULES', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, :n_train, FALSE,
+                   'rules classifier pinned by REF.PARAMS.use_rules_classifier=1';
         RETURN 'RULES classifier selected by REF.PARAMS.use_rules_classifier=1 ('
             || :n_train || ' labelled epochs available)';
     END IF;
@@ -191,17 +281,45 @@ BEGIN
             CONFIG_OBJECT  => {'on_error': 'skip'}
         );
 
-        -- The model's own internal evaluation. Useful, but NOT the headline
-        -- number: its split is internal to the training set, so it still shares
-        -- dogs across the fold.
-        CREATE OR REPLACE TABLE ML.MODEL_EVAL AS
-            SELECT * FROM TABLE(ML.STATE_MODEL!SHOW_EVALUATION_METRICS());
+        -- Record the win before touching anything that can fail. If an
+        -- accessor blows up below, this row still says a real model trained.
+        DELETE FROM ML.MODEL_STATUS;
+        INSERT INTO ML.MODEL_STATUS
+            SELECT 'ML.CLASSIFICATION', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ,
+                   :n_train, TRUE, NULL;
 
-        -- Feature importance. A free win: if neck_back_corr ranks high, the
-        -- feature that was invented for this build is the one the model leans
-        -- on, and that is a chart rather than a claim.
-        CREATE OR REPLACE TABLE ML.FEATURE_IMPORTANCE AS
-            SELECT * FROM TABLE(ML.STATE_MODEL!SHOW_FEATURE_IMPORTANCE());
+        -- The model's introspection accessors, in their OWN handler.
+        --
+        -- On this account every accessor — SHOW_EVALUATION_METRICS,
+        -- SHOW_FEATURE_IMPORTANCE, SHOW_TRAINING_LOGS — raises
+        -- "Computation Error in function __SHOW_*". PREDICT works perfectly.
+        -- Verified it is not our data: the same failure reproduces after
+        -- dropping the rare classes, and after training from a materialised
+        -- table instead of a view. It is the introspection API on this
+        -- Snowflake version, not the model.
+        --
+        -- Without this nested block that failure propagates to the outer
+        -- handler, which throws away a model that trained fine and silently
+        -- drops the whole build to the rules classifier. Losing the optional
+        -- reporting tables is survivable; losing the classifier is not.
+        --
+        -- Neither table is load-bearing. SHOW_EVALUATION_METRICS reports the
+        -- model's internal split, which shares dogs across the fold, so it was
+        -- never the headline number — ML.SP_EVALUATE_HOLDOUT computes that on
+        -- entirely unseen dogs. Feature importance is replaced by
+        -- ML.FEATURE_SEPARATION below, which we compute ourselves.
+        BEGIN
+            CREATE OR REPLACE TABLE ML.MODEL_EVAL AS
+                SELECT * FROM TABLE(ML.STATE_MODEL!SHOW_EVALUATION_METRICS());
+            UPDATE ML.MODEL_STATUS SET accessors_ok = TRUE, accessor_error = NULL;
+        EXCEPTION
+            WHEN OTHER THEN
+                CREATE OR REPLACE TABLE ML.MODEL_EVAL (
+                    metric STRING, value FLOAT, note STRING);
+                UPDATE ML.MODEL_STATUS
+                   SET accessors_ok   = FALSE,
+                       accessor_error = SQLERRM;
+        END;
 
         CREATE OR REPLACE VIEW ML.V_STATE_PREDICTION AS
             SELECT
@@ -257,6 +375,10 @@ BEGIN
                 SELECT dog_id, test_num, epoch_ts, state, confidence, state_source
                 FROM ML.V_RULES_STATE;
             UPDATE REF.PARAMS SET value_num = 1 WHERE key = 'use_rules_classifier';
+            DELETE FROM ML.MODEL_STATUS;
+            INSERT INTO ML.MODEL_STATUS
+                SELECT 'RULES (fallback)', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ,
+                       :n_train, FALSE, SQLERRM;
             msg := 'FALLBACK to RULES classifier — ML.CLASSIFICATION failed: '
                 || SQLERRM || ' (recorded in REF.PARAMS.use_rules_classifier=1)';
     END;
