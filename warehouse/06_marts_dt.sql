@@ -63,6 +63,21 @@ WITH base AS (
         COALESCE(pr.state_source, 'MODEL') AS model_source,
         -- dynamic (gravity-removed) back magnitude: is the dog travelling?
         ABS(e.vm_back_mean - p.o:gravity_ref::FLOAT) AS dyn_back,
+
+        -- PLAIN locomotion: the classifier says the dog is travelling AND the
+        -- yaw geometry does not make this a pacing epoch.
+        --
+        -- The distinction matters for the PAUSE rung below. PAUSE means "gait
+        -- interrupted", which is the S2 lameness signal. A still second in the
+        -- middle of PACING is not a stride interruption — it is the dog
+        -- stopping to check the door, which is the singleton alert stand S5 is
+        -- built on. Counting pacing as locomotion here promotes that stand to
+        -- PAUSE and S5 stops firing entirely.
+        IFF(pr.state IN ('WALK','TROT','GALLOP')
+            AND NOT (pr.state IN ('WALK','TROT')
+                     AND e.yaw_consistency <= p.o:pace_yaw_consistency_max::FLOAT
+                     AND e.yaw_abs_mean    >= p.o:pace_yaw_activity_min::FLOAT),
+            1, 0)                                    AS is_plain_loco,
         p.o AS prm,
         nl.has_shake, nl.has_scratch
     FROM STAGING.V_EPOCH_ALL e
@@ -76,13 +91,13 @@ WITH base AS (
 ctx AS (
     SELECT
         *,
-        -- locomotion in the neighbourhood, for the PAUSE rung. The frame bounds
-        -- are literals because SQL window frames cannot be parameterised; the
-        -- value is documented in REF.PARAMS.pause_neighbour_epochs.
-        MAX(IFF(model_state IN ('WALK','TROT','GALLOP'), 1, 0)) OVER (
+        -- Plain locomotion in the neighbourhood, for the PAUSE rung. The frame
+        -- bounds are literals because SQL window frames cannot be parameterised;
+        -- the value is documented in REF.PARAMS.pause_neighbour_epochs.
+        MAX(is_plain_loco) OVER (
             PARTITION BY dog_id, test_num ORDER BY epoch_ts
             ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING)              AS loco_before,
-        MAX(IFF(model_state IN ('WALK','TROT','GALLOP'), 1, 0)) OVER (
+        MAX(is_plain_loco) OVER (
             PARTITION BY dog_id, test_num ORDER BY epoch_ts
             ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING)              AS loco_after
     FROM base
@@ -171,32 +186,43 @@ laddered AS (
     FROM ctx
 )
 SELECT
-    dog_id, test_num, epoch_ts, n_samples, is_synthetic, source,
-    label_primary, model_state, model_confidence, state_source,
-    state_raw,
+    l.dog_id, l.test_num, l.epoch_ts, l.n_samples, l.is_synthetic, l.source,
+    l.label_primary, l.model_state, l.model_confidence, l.state_source,
+    l.state_raw,
 
     -- Three-point despeckle. A one-second classifier flickers, and
-    -- MATCH_RECOGNIZE requires contiguity: a single stray epoch inside a scratch
+    -- MATCH_RECOGNIZE requires CONTIGUITY: a single stray epoch inside a scratch
     -- bout breaks itch{3,} and the syndrome silently never fires. An isolated
     -- epoch flanked by two identical different states is replaced by them.
-    -- Nothing else is touched — this removes speckle, it does not invent states.
+    --
+    -- GUARDED BY singleton_diagnostic, and the guard is the important half.
+    -- S1 is REST SHAKE SCRATCH{3,} SHAKE SCRATCH{2,}: the head shake between the
+    -- two scratch bouts is exactly ONE epoch flanked by two identical SCRATCH
+    -- epochs, so unguarded smoothing deletes the very alternation the syndrome
+    -- is defined by. Same for the single PAUSE in S2 and the alert STAND in S5.
+    -- States that a pattern can match as a bare variable are never smoothed away.
+    --
+    -- This removes speckle. It does not invent states, and it does not remove
+    -- findings.
     CASE
-        WHEN LAG(state_raw)  OVER w = LEAD(state_raw) OVER w
-         AND LAG(state_raw)  OVER w <> state_raw
-         AND LAG(state_raw)  OVER w IS NOT NULL
-         AND LEAD(state_raw) OVER w IS NOT NULL
-        THEN LAG(state_raw) OVER w
-        ELSE state_raw
+        WHEN NOT COALESCE(e.singleton_diagnostic, TRUE)
+         AND LAG(l.state_raw)  OVER w = LEAD(l.state_raw) OVER w
+         AND LAG(l.state_raw)  OVER w <> l.state_raw
+         AND LAG(l.state_raw)  OVER w IS NOT NULL
+         AND LEAD(l.state_raw) OVER w IS NOT NULL
+        THEN LAG(l.state_raw) OVER w
+        ELSE l.state_raw
     END                                                            AS state,
 
-    vm_neck_std, vm_neck_mean, neck_back_corr, neck_dominance, zcr_neck,
-    pitch_var, yaw_consistency, yaw_abs_mean, dyn_back, activity_index,
+    l.vm_neck_std, l.vm_neck_mean, l.neck_back_corr, l.neck_dominance, l.zcr_neck,
+    l.pitch_var, l.yaw_consistency, l.yaw_abs_mean, l.dyn_back, l.activity_index,
 
     -- epoch quality in [0,1], used by the syndrome confidence score
-    LEAST(1.0, n_samples / 100.0)                                  AS quality,
-    IFF(state_source IN ('MODEL','RULES'), 1, 0)                   AS is_model
-FROM laddered
-WINDOW w AS (PARTITION BY dog_id, test_num ORDER BY epoch_ts);
+    LEAST(1.0, l.n_samples / 100.0)                                AS quality,
+    IFF(l.state_source IN ('MODEL','RULES'), 1, 0)                 AS is_model
+FROM laddered l
+LEFT JOIN REF.ETHOGRAM e ON e.state = l.state_raw
+WINDOW w AS (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts);
 
 -- The exact row set the pattern layer scans. Narrow on purpose: MATCH_RECOGNIZE
 -- reads every column of every row in the partition, so carrying 25 features

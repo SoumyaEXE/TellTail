@@ -93,12 +93,17 @@ RECIPES: dict[str, dict] = {
     "GALLOP":          dict(neck_amp=1.750, back_amp=1.650, freq=4.20, coupled=True,
                             yaw=0.03, yaw_osc=0.08, pitch_offset=0.00, pitch_drift=0.00),
     # head down, body still: decoupled, modest neck activity, negative pitch
-    "SNIFF":           dict(neck_amp=0.220, back_amp=0.045, freq=1.40, coupled=False,
+    "SNIFF":           dict(neck_amp=0.600, back_amp=0.045, freq=1.40, coupled=False,
                             yaw=0.04, yaw_osc=0.10, pitch_offset=-0.55, pitch_drift=0.00),
     # neck-dominant: the back barely moves, so the two channels decouple
-    "SCRATCH":         dict(neck_amp=1.500, back_amp=0.050, freq=7.00, coupled=False,
+    # SCRATCH and SHAKE are separated by variance alone, and the bands are
+    # adjacent (SCRATCH 0.40–0.90, SHAKE above 0.90). Both amplitudes are set to
+    # land mid-band rather than near an edge, so a threshold nudge in REF.PARAMS
+    # does not silently turn a head shake into a scratch bout — which would
+    # break S1, whose entire signal is the ALTERNATION of the two.
+    "SCRATCH":         dict(neck_amp=2.200, back_amp=0.050, freq=7.00, coupled=False,
                             yaw=0.00, yaw_osc=0.30, pitch_offset=0.00, pitch_drift=0.00),
-    "SHAKE":           dict(neck_amp=2.900, back_amp=0.090, freq=11.0, coupled=False,
+    "SHAKE":           dict(neck_amp=4.400, back_amp=0.090, freq=11.0, coupled=False,
                             yaw=0.00, yaw_osc=0.80, pitch_offset=0.00, pitch_drift=0.00),
     # derived-state geometry
     "PACE":            dict(neck_amp=0.620, back_amp=0.580, freq=2.20, coupled=True,

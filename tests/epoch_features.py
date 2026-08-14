@@ -49,7 +49,7 @@ def load_params() -> dict[str, float]:
 
     out: dict[str, float] = {}
     for m in re.finditer(
-        r"\('([a-z0-9_]+)',\s*([0-9.]+|NULL)\s*,", block.group(0)
+        r"\('([a-z0-9_]+)',\s*(-?[0-9.]+|NULL)\s*,", block.group(0)
     ):
         key, val = m.group(1), m.group(2)
         if val != "NULL":

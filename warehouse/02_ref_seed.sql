@@ -75,36 +75,54 @@ CREATE TABLE IF NOT EXISTS REF.LABEL_MAP (
 --    SNOWFLAKE.ML.CLASSIFICATION, HEURISTIC states come from thresholds over
 --    the feature layer and are labelled as such everywhere they appear.
 -- ---------------------------------------------------------------------------
+-- `singleton_diagnostic` is load-bearing and easy to overlook.
+--
+-- MARTS.EPOCH_STATES runs a three-point despeckle filter: an isolated epoch
+-- flanked by two identical different states is replaced by them. That is the
+-- right treatment for classifier flicker inside a long run — and it is
+-- catastrophic for a state whose SINGLE-EPOCH OCCURRENCE IS THE FINDING.
+--
+-- S1 is REST SHAKE SCRATCH{3,} SHAKE SCRATCH{2,}: the head shake between two
+-- scratch bouts is exactly one epoch, flanked by two identical SCRATCH epochs.
+-- Unguarded smoothing deletes it, the alternation vanishes, and the syndrome
+-- silently never fires. Same for the PAUSE in S2 and the alert STAND in S5.
+--
+-- So states that any pattern matches as a bare (unquantified) variable are
+-- exempt from smoothing. Locomotion states are not: a single stray WALK inside
+-- a scratch bout is noise, and removing it is what keeps itch{3,} contiguous.
 CREATE OR REPLACE TABLE REF.ETHOGRAM (
     state            STRING  NOT NULL,
     display_name     STRING,
     family           STRING,          -- posture | locomotion | neck_dominant | derived
     derivation       STRING,          -- MODEL | HEURISTIC | CONTEXT
     is_neck_dominant BOOLEAN,
+    singleton_diagnostic BOOLEAN,     -- exempt from the despeckle filter
     colour_hex       STRING,
     sort_order       NUMBER,
     description      STRING
 );
 
 INSERT INTO REF.ETHOGRAM
-    (state, display_name, family, derivation, is_neck_dominant, colour_hex, sort_order, description)
+    (state, display_name, family, derivation, is_neck_dominant,
+     singleton_diagnostic, colour_hex, sort_order, description)
 SELECT * FROM VALUES
- ('REST',    'Resting',      'posture',       'MODEL',     FALSE, '#A8A29E',  1, 'Lying on chest. Low vector magnitude, stable pitch.'),
- ('SIT',     'Sitting',      'posture',       'MODEL',     FALSE, '#D6D3D1',  2, 'Upright, stationary, pitch distinct from lying.'),
- ('STAND',   'Standing',     'posture',       'MODEL',     FALSE, '#E7E5E4',  3, 'Upright, stationary, four-point stance.'),
- ('WALK',    'Walking',      'locomotion',    'MODEL',     FALSE, '#BFDBFE',  4, 'Both sensors in phase, low cadence.'),
- ('TROT',    'Trotting',     'locomotion',    'MODEL',     FALSE, '#60A5FA',  5, 'Both sensors in phase, mid cadence.'),
- ('GALLOP',  'Galloping',    'locomotion',    'MODEL',     FALSE, '#1D4ED8',  6, 'Both sensors in phase, high magnitude.'),
- ('SNIFF',   'Sniffing',     'posture',       'MODEL',     FALSE, '#FDE68A',  7, 'Treat-searching. Head down, low translation.'),
- ('PLAY',    'Playing',      'locomotion',    'MODEL',     FALSE, '#93C5FD',  8, 'High variance, irregular, both sensors active.'),
- ('SHAKE',   'Head shake',   'neck_dominant', 'HEURISTIC', TRUE,  '#B45309',  9, 'Neck-dominant, high frequency, sensors decoupled.'),
- ('SCRATCH', 'Scratching',   'neck_dominant', 'HEURISTIC', TRUE,  '#D97706', 10, 'Neck-dominant, sustained, sensors decoupled.'),
- ('PAUSE',   'Pause',        'derived',       'CONTEXT',   FALSE, '#FCA5A5', 11, 'Still epoch bracketed by locomotion. Stride interruption.'),
- ('PACE',    'Pacing',       'derived',       'CONTEXT',   FALSE, '#F59E0B', 12, 'Locomotion with repeated yaw reversal. Back-and-forth.'),
- ('CIRCLE',  'Circling',     'derived',       'CONTEXT',   FALSE, '#EA580C', 13, 'Sustained same-direction yaw, low forward translation.'),
- ('SLOW_TRANSITION','Slow rise','derived',    'CONTEXT',   FALSE, '#C2410C', 14, 'Pitch variance rises while magnitude stays low. Levering up.'),
- ('UNKNOWN', 'Unknown',      'derived',       'CONTEXT',   FALSE, '#F5F5F4', 98, 'Epoch failed the sample-count quality gate.')
-AS v(state, display_name, family, derivation, is_neck_dominant, colour_hex, sort_order, description);
+ ('REST',    'Resting',      'posture',       'MODEL',     FALSE, TRUE,  '#A8A29E',  1, 'Lying on chest. Low vector magnitude, stable pitch. Singleton onset in S1.'),
+ ('SIT',     'Sitting',      'posture',       'MODEL',     FALSE, FALSE, '#D6D3D1',  2, 'Upright, stationary, pitch distinct from lying. Model-only; the rules fallback reads it as STAND.'),
+ ('STAND',   'Standing',     'posture',       'MODEL',     FALSE, TRUE,  '#E7E5E4',  3, 'Upright, stationary. Singleton alert stand in S5, singleton rise in S4.'),
+ ('WALK',    'Walking',      'locomotion',    'MODEL',     FALSE, FALSE, '#BFDBFE',  4, 'Both sensors in phase, low cadence.'),
+ ('TROT',    'Trotting',     'locomotion',    'MODEL',     FALSE, FALSE, '#60A5FA',  5, 'Both sensors in phase, mid cadence.'),
+ ('GALLOP',  'Galloping',    'locomotion',    'MODEL',     FALSE, FALSE, '#1D4ED8',  6, 'Both sensors in phase, high magnitude.'),
+ ('SNIFF',   'Sniffing',     'posture',       'MODEL',     FALSE, FALSE, '#FDE68A',  7, 'Treat-searching. Head down, low translation.'),
+ ('PLAY',    'Playing',      'locomotion',    'MODEL',     FALSE, FALSE, '#93C5FD',  8, 'High variance, irregular, both sensors active. Model-only.'),
+ ('SHAKE',   'Head shake',   'neck_dominant', 'HEURISTIC', TRUE,  TRUE,  '#B45309',  9, 'Neck-dominant, high frequency, sensors decoupled. Singleton in S1 — never smoothed.'),
+ ('SCRATCH', 'Scratching',   'neck_dominant', 'HEURISTIC', TRUE,  FALSE, '#D97706', 10, 'Neck-dominant, sustained, sensors decoupled. Always quantified in patterns.'),
+ ('PAUSE',   'Pause',        'derived',       'CONTEXT',   FALSE, TRUE,  '#FCA5A5', 11, 'Still epoch bracketed by locomotion. Singleton stride interruption in S2.'),
+ ('PACE',    'Pacing',       'derived',       'CONTEXT',   FALSE, FALSE, '#F59E0B', 12, 'Locomotion with repeated yaw reversal. Back-and-forth.'),
+ ('CIRCLE',  'Circling',     'derived',       'CONTEXT',   FALSE, FALSE, '#EA580C', 13, 'Sustained same-direction yaw, low forward translation.'),
+ ('SLOW_TRANSITION','Slow rise','derived',    'CONTEXT',   FALSE, TRUE,  '#C2410C', 14, 'Pitch variance rises while magnitude stays low. Singleton lever-up in S4.'),
+ ('UNKNOWN', 'Unknown',      'derived',       'CONTEXT',   FALSE, TRUE,  '#F5F5F4', 98, 'Epoch failed the sample-count quality gate. Never smoothed over.')
+AS v(state, display_name, family, derivation, is_neck_dominant, singleton_diagnostic,
+     colour_hex, sort_order, description);
 
 -- ---------------------------------------------------------------------------
 -- 4. Tunable parameters. Every threshold in the build reads from here.
