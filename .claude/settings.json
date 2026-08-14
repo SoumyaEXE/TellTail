@@ -6,7 +6,9 @@
       "Bash(python scripts/run_sql.py --only 06)",
       "Bash(grep -vE \"^\\\\s*$\")",
       "Bash(python scripts/run_sql.py --only 07)",
-      "Bash(python scripts/run_sql.py --only 02 --skip-bootstrap)"
+      "Bash(python scripts/run_sql.py --only 02 --skip-bootstrap)",
+      "Bash(python tests/run_all.py)",
+      "Bash(python tests/test_syndrome_patterns.py)"
     ]
   }
 }

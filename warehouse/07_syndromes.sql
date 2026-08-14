@@ -69,7 +69,7 @@ $$;
 -- ===========================================================================
 -- S1 — Otitis / ear irritation
 --
---   PATTERN ( onset shake itch{3,} shake2 itch2{2,} )
+--   PATTERN ( onset shake+ itch{3,} shake2+ itch2{2,} )
 --
 -- Why a sequence and not a threshold: daily scratch count is normal in a
 -- flea-free dog. The clinical signal is the ALTERNATION of head shake and
@@ -96,9 +96,9 @@ mr AS (
             COUNT(itch2.*)                          AS bout2_epochs
         ONE ROW PER MATCH
         AFTER MATCH SKIP PAST LAST ROW
-        PATTERN ( onset shake itch{3,} shake2 itch2{2,} )
+        PATTERN ( onset shake+ itch{3,} shake2+ itch2{2,} )
         DEFINE
-            onset  AS state = 'REST',
+            onset  AS state IN ('REST','SIT','STAND'),
             shake  AS state = 'SHAKE',
             itch   AS state = 'SCRATCH',
             shake2 AS state = 'SHAKE',
@@ -121,7 +121,7 @@ FROM mr;
 -- ===========================================================================
 -- S2 — Intermittent lameness
 --
---   PATTERN ( stride{3,} halt stride2{1,3} halt2 stride3{1,3} halt3 )
+--   PATTERN ( stride{3,} halt+ stride2{1,3} halt2+ stride3{1,3} halt3+ )
 --
 -- Why: step count is unchanged and daily distance is unchanged. Stride
 -- INTERRUPTION FREQUENCY is rising. This is the presentation an owner describes
@@ -147,7 +147,7 @@ mr AS (
             COUNT(stride3.*)        AS run3
         ONE ROW PER MATCH
         AFTER MATCH SKIP PAST LAST ROW
-        PATTERN ( stride{3,} halt stride2{1,3} halt2 stride3{1,3} halt3 )
+        PATTERN ( stride{3,} halt+ stride2{1,3} halt2+ stride3{1,3} halt3+ )
         DEFINE
             stride  AS state = 'WALK',
             halt    AS state = 'PAUSE',
@@ -203,10 +203,10 @@ mr AS (
         AFTER MATCH SKIP PAST LAST ROW
         PATTERN ( burst+ recover{5,} burst2{1,2} recover2{8,} )
         DEFINE
-            burst    AS state = 'TROT',
-            recover  AS state = 'REST',
-            burst2   AS state = 'TROT',
-            recover2 AS state = 'REST'
+            burst    AS state IN ('TROT','GALLOP'),
+            recover  AS state IN ('REST','SIT','STAND'),
+            burst2   AS state IN ('TROT','GALLOP'),
+            recover2 AS state IN ('REST','SIT','STAND')
     )
 )
 SELECT

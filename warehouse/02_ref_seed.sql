@@ -246,8 +246,16 @@ FROM VALUES
 (
   'S1', 'Otitis / ear irritation', 'aural',
   '["onset","shake","itch","shake2","itch2"]',
-  'onset shake itch{3,} shake2 itch2{2,}',
-  'onset AS state = ''REST'', shake AS state = ''SHAKE'', itch AS state = ''SCRATCH'', shake2 AS state = ''SHAKE'', itch2 AS state = ''SCRATCH''',
+  -- shake+ not shake. A head shake is a BOUT, median 2 epochs long, not an
+  -- instant. Written as a single-epoch symbol the pattern consumed one epoch
+  -- of the shake and then demanded SCRATCH from the second epoch of the same
+  -- shake, so it could only ever match a shake that happened to last exactly
+  -- one second. Same error in S2 and S3 below.
+  'onset shake+ itch{3,} shake2+ itch2{2,}',
+  -- onset is the resting POSTURE the bout emerges from, not lying down
+  -- specifically: dogs shake their ears from a sit or a stand far more often
+  -- than from sternal rest, and REST -> SHAKE occurs twice in 106k epochs.
+  'onset AS state IN (''REST'',''SIT'',''STAND''), shake AS state = ''SHAKE'', itch AS state = ''SCRATCH'', shake2 AS state = ''SHAKE'', itch2 AS state = ''SCRATCH''',
   7, 2,
   'Head shake alternating with sustained scratch bouts, emerging from rest, is the classic presentation of external ear canal irritation. The alternation is the sign; either behaviour alone is normal grooming.',
   'Daily scratch count is normal in a flea-free dog. A totals-based tracker sees an unremarkable number. The clinical signal is the ALTERNATION of shake and scratch, and an average has no concept of order.'
@@ -255,7 +263,10 @@ FROM VALUES
 (
   'S2', 'Intermittent lameness', 'musculoskeletal',
   '["stride","halt","stride2","halt2","stride3","halt3"]',
-  'stride{3,} halt stride2{1,3} halt2 stride3{1,3} halt3',
+  -- halt+ for the same bout-not-instant reason as S1. PAUSE bouts run 1-13
+  -- epochs; a single-epoch halt symbol silently required every interruption
+  -- to be exactly one second long.
+  'stride{3,} halt+ stride2{1,3} halt2+ stride3{1,3} halt3+',
   'stride AS state = ''WALK'', halt AS state = ''PAUSE'', stride2 AS state = ''WALK'', halt2 AS state = ''PAUSE'', stride3 AS state = ''WALK'', halt3 AS state = ''PAUSE''',
   8, 2,
   'A sound gait interrupted by repeated short pauses at shortening intervals. The dog offloads the limb, rests it, resumes. Weight-bearing lameness before it becomes a limp an owner can see.',
@@ -265,7 +276,11 @@ FROM VALUES
   'S3', 'Exercise intolerance', 'cardiorespiratory',
   '["burst","recover","burst2","recover2"]',
   'burst+ recover{5,} burst2{1,2} recover2{8,}',
-  'burst AS state = ''TROT'', recover AS state = ''REST'', burst2 AS state = ''TROT'', recover2 AS state = ''REST''',
+  -- recover means STOPPED MOVING, not lying down. Defined as REST alone this
+  -- pattern was unsatisfiable on any corpus: TROT -> REST occurs zero times in
+  -- 106k epochs, because a dog coming off a trot stands or sits first. A burst
+  -- is likewise any fast gait, so GALLOP counts.
+  'burst AS state IN (''TROT'',''GALLOP''), recover AS state IN (''REST'',''SIT'',''STAND''), burst2 AS state IN (''TROT'',''GALLOP''), recover2 AS state IN (''REST'',''SIT'',''STAND'')',
   15, 3,
   'Activity bursts collapsing in length while recovery intervals lengthen. Reduced exercise tolerance is an early sign in cardiac and respiratory disease, and it appears in the shape of the day long before total activity falls.',
   'Total activity minutes are IDENTICAL. The same minutes are redistributed into shorter bursts with progressively longer recoveries. A daily total is definitionally blind to this; only the ordered burst/recovery ratio shows it.'
@@ -314,13 +329,13 @@ CREATE OR REPLACE TABLE REF.SYNDROME_VARIANTS (
 
 INSERT INTO REF.SYNDROME_VARIANTS (syndrome_code, variant, pattern_text, min_epochs, note)
 SELECT * FROM VALUES
- ('S1','loose',  'onset shake itch{2,} shake2 itch2{1,}',                     5,  'one fewer scratch epoch per bout'),
- ('S1','tuned',  'onset shake itch{3,} shake2 itch2{2,}',                     7,  'clinical default'),
- ('S1','strict', 'onset shake itch{5,} shake2 itch2{4,}',                     11, 'two more scratch epochs per bout'),
+ ('S1','loose',  'onset shake+ itch{2,} shake2+ itch2{1,}',                     5,  'one fewer scratch epoch per bout'),
+ ('S1','tuned',  'onset shake+ itch{3,} shake2+ itch2{2,}',                     7,  'clinical default'),
+ ('S1','strict', 'onset shake+ itch{5,} shake2+ itch2{4,}',                     11, 'two more scratch epochs per bout'),
 
- ('S2','loose',  'stride{2,} halt stride2{1,4} halt2 stride3{1,4} halt3',     6,  'shorter stride runs accepted'),
- ('S2','tuned',  'stride{3,} halt stride2{1,3} halt2 stride3{1,3} halt3',     8,  'clinical default'),
- ('S2','strict', 'stride{5,} halt stride2{1,2} halt2 stride3{1,2} halt3',     10, 'longer initial stride, tighter recoveries'),
+ ('S2','loose',  'stride{2,} halt+ stride2{1,4} halt2+ stride3{1,4} halt3+',     6,  'shorter stride runs accepted'),
+ ('S2','tuned',  'stride{3,} halt+ stride2{1,3} halt2+ stride3{1,3} halt3+',     8,  'clinical default'),
+ ('S2','strict', 'stride{5,} halt+ stride2{1,2} halt2+ stride3{1,2} halt3+',     10, 'longer initial stride, tighter recoveries'),
 
  ('S3','loose',  'burst+ recover{3,} burst2{1,3} recover2{5,}',               10, 'shorter recoveries accepted'),
  ('S3','tuned',  'burst+ recover{5,} burst2{1,2} recover2{8,}',               15, 'clinical default'),
