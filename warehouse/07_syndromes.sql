@@ -397,14 +397,25 @@ LANGUAGE SQL
 AS
 $$
 BEGIN
+    -- Land the six patterns one at a time before combining them.
+    --
+    -- The obvious version — a CTE that UNION ALLs the six views — does not
+    -- compile: "Failure during expansion of view 'V_SYNDROME_S1': SQL
+    -- compilation error: MATCH_RECOGNIZE not supported in this context."
+    -- Each view is fine on its own and returns the identical ten columns;
+    -- Snowflake simply will not expand a row-pattern view inside that
+    -- combination. Materialising first is not a workaround for a bug in the
+    -- patterns, it is the shape MATCH_RECOGNIZE is willing to be composed in.
+    CREATE OR REPLACE TABLE MARTS.SYNDROME_RAW AS SELECT * FROM MARTS.V_SYNDROME_S1;
+    INSERT INTO MARTS.SYNDROME_RAW SELECT * FROM MARTS.V_SYNDROME_S2;
+    INSERT INTO MARTS.SYNDROME_RAW SELECT * FROM MARTS.V_SYNDROME_S3;
+    INSERT INTO MARTS.SYNDROME_RAW SELECT * FROM MARTS.V_SYNDROME_S4;
+    INSERT INTO MARTS.SYNDROME_RAW SELECT * FROM MARTS.V_SYNDROME_S5;
+    INSERT INTO MARTS.SYNDROME_RAW SELECT * FROM MARTS.V_SYNDROME_S6;
+
     CREATE OR REPLACE TABLE MARTS.SYNDROME_MATCHES AS
     WITH all_matches AS (
-        SELECT * FROM MARTS.V_SYNDROME_S1
-        UNION ALL SELECT * FROM MARTS.V_SYNDROME_S2
-        UNION ALL SELECT * FROM MARTS.V_SYNDROME_S3
-        UNION ALL SELECT * FROM MARTS.V_SYNDROME_S4
-        UNION ALL SELECT * FROM MARTS.V_SYNDROME_S5
-        UNION ALL SELECT * FROM MARTS.V_SYNDROME_S6
+        SELECT * FROM MARTS.SYNDROME_RAW
     ),
     -- Aggregated separately and joined back rather than GROUP BY ALL over
     -- all_matches: `evidence` is a VARIANT and VARIANT columns are not
@@ -609,6 +620,40 @@ BEGIN
         || (SELECT COUNT(*) FROM MARTS.SYNDROME_SENSITIVITY) || ' matches';
 END;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Placeholders so the reporting views below compile on a cold warehouse.
+--
+-- The three tables they read are built by the procedures above, which the
+-- bootstrap calls only AFTER every statement in this file has run. Without
+-- these, `run_sql.py --only 07` fails on a fresh account at the first view
+-- that reads a table no procedure has created yet.
+--
+-- IF NOT EXISTS, so a rebuild never destroys real matches; the procedures
+-- CREATE OR REPLACE these with the real contents and the real column types.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS MARTS.SYNDROME_SENSITIVITY (
+    syndrome_code STRING, variant STRING, pattern_text STRING,
+    dog_id NUMBER, test_num NUMBER, match_id NUMBER,
+    onset_ts TIMESTAMP_NTZ, resolve_ts TIMESTAMP_NTZ,
+    n_epochs NUMBER, duration_s NUMBER, min_epochs NUMBER
+);
+
+CREATE TABLE IF NOT EXISTS MARTS.SYNDROME_MATCH_ROWS (
+    syndrome_code STRING, dog_id NUMBER, test_num NUMBER, match_id NUMBER,
+    epoch_ts TIMESTAMP_NTZ, state STRING, symbol STRING, seq_in_match NUMBER
+);
+
+CREATE TABLE IF NOT EXISTS MARTS.SYNDROME_MATCHES (
+    syndrome_code STRING, syndrome_name STRING, body_system STRING,
+    variant STRING, dog_id NUMBER, test_num NUMBER, match_id NUMBER,
+    onset_ts TIMESTAMP_NTZ, resolve_ts TIMESTAMP_NTZ,
+    duration_s NUMBER, n_epochs NUMBER, evidence VARIANT,
+    avg_quality FLOAT, model_purity FLOAT, confidence FLOAT,
+    severity STRING, pattern_text STRING, define_text STRING,
+    why_not_threshold STRING, model_version STRING,
+    detected_at TIMESTAMP_LTZ
+);
 
 -- The chart on the Syndromes tab, and the paragraph in the post.
 CREATE OR REPLACE VIEW MARTS.V_SENSITIVITY_CURVE AS
