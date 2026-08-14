@@ -143,6 +143,13 @@ SELECT * FROM VALUES
  ('rules_trot_vm_min',        1.25, NULL, 'g',       'Rules fallback: TROT magnitude floor.'),
  ('rules_walk_corr_min',      0.50, NULL, 'r',       'Rules fallback: WALK correlation floor.'),
  ('rules_walk_vm_min',        1.08, NULL, 'g',       'Rules fallback: WALK magnitude floor.'),
+ -- SNIFF in the fallback matters more than it looks: S6 (GI discomfort) is
+ -- built on SNIFF and CIRCLE, so without this rule the rules-only path cannot
+ -- express one of the six syndromes at all. Head-down orientation with modest
+ -- neck activity and little whole-body translation.
+ ('rules_sniff_pitch_max',   -0.25, NULL, 'rad',     'Rules fallback: SNIFF ceiling on mean neck pitch. Negative = head down.'),
+ ('rules_sniff_vm_std_min',   0.05, NULL, 'g',       'Rules fallback: SNIFF floor on neck SD. Above a still posture.'),
+ ('rules_sniff_vm_std_max',   0.45, NULL, 'g',       'Rules fallback: SNIFF ceiling on neck SD. Below a scratch bout.'),
  ('use_rules_classifier',     0,    NULL, 'bool',    '1 = bypass ML.CLASSIFICATION and use the transparent SQL rules ethogram.'),
  -- derived context states
  ('pause_vm_std_max',         0.12, NULL, 'g',       'PAUSE: stillness ceiling on neck SD.'),

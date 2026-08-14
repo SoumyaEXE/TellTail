@@ -112,6 +112,12 @@ SELECT
                                AND p.o:scratch_vm_std_max::FLOAT
          AND e.neck_back_corr < p.o:scratch_corr_max::FLOAT
          AND e.neck_dominance > p.o:neck_dominance_min::FLOAT          THEN 'SCRATCH'
+        -- SNIFF before the locomotion rules. S6 (GI discomfort) is built on
+        -- SNIFF and CIRCLE, so omitting it here would leave the rules-only path
+        -- unable to express one of the six syndromes.
+        WHEN e.pitch_neck_mean < p.o:rules_sniff_pitch_max::FLOAT
+         AND e.vm_neck_std BETWEEN p.o:rules_sniff_vm_std_min::FLOAT
+                               AND p.o:rules_sniff_vm_std_max::FLOAT   THEN 'SNIFF'
         WHEN e.neck_back_corr > p.o:rules_gallop_corr_min::FLOAT
          AND e.vm_neck_mean   > p.o:rules_gallop_vm_min::FLOAT         THEN 'GALLOP'
         WHEN e.neck_back_corr > p.o:rules_trot_corr_min::FLOAT

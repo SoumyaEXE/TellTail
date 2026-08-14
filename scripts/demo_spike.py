@@ -54,37 +54,64 @@ SR = 100  # Hz, matching the corpus
 # why a synthetic scratch bout is classified as a scratch bout rather than
 # being asserted as one.
 # ---------------------------------------------------------------------------
+# Parameters, and what each one is doing:
+#   neck_amp/back_amp  oscillation amplitude in g. Because the oscillation adds
+#                      to gravity in quadrature, mean|a| ≈ sqrt(1 + 0.65·amp²);
+#                      crossing the WALK/TROT/GALLOP magnitude thresholds needs
+#                      much larger amplitudes than intuition suggests.
+#   coupled            do both sensors share phase? This is THE property. Coupled
+#                      -> CORR near +1 -> whole-body locomotion. Decoupled -> CORR
+#                      near 0 -> the neck moved and the body did not.
+#   yaw                sustained gyro-z, i.e. turning consistently one way.
+#   yaw_osc            oscillating gyro-z. Held at an integer frequency so it
+#                      integrates to zero over a one-second epoch regardless of
+#                      phase — otherwise yaw_consistency depends on where the
+#                      epoch boundary happens to fall, and CIRCLE fires on
+#                      everything.
+#   pitch_offset       constant head-down tilt (SNIFF).
+#   pitch_drift        linear tilt ACROSS the second, so pitch variance rises
+#                      while magnitude stays low (SLOW_TRANSITION).
+#
+# Calibrated against the thresholds in REF.PARAMS by tests/test_demo_signal.py,
+# which fails if any recipe stops producing the state it claims.
+YAW_OSC_HZ = 2.0        # integer cycles per epoch => mean yaw contribution ~0
+
 RECIPES: dict[str, dict] = {
-    # amp = oscillation amplitude (g), freq = Hz, yaw = mean gyro-z (rad/s),
-    # yaw_osc = yaw oscillation amplitude, coupled = do both sensors share phase
     "REST":            dict(neck_amp=0.010, back_amp=0.010, freq=0.30, coupled=True,
-                            yaw=0.00, yaw_osc=0.01, pitch_drift=0.00),
-    "STAND":           dict(neck_amp=0.045, back_amp=0.040, freq=0.80, coupled=True,
-                            yaw=0.00, yaw_osc=0.05, pitch_drift=0.00),
-    "SIT":             dict(neck_amp=0.030, back_amp=0.025, freq=0.60, coupled=True,
-                            yaw=0.00, yaw_osc=0.03, pitch_drift=0.00),
-    "WALK":            dict(neck_amp=0.220, back_amp=0.200, freq=2.20, coupled=True,
-                            yaw=0.02, yaw_osc=0.15, pitch_drift=0.00),
-    "TROT":            dict(neck_amp=0.480, back_amp=0.450, freq=3.40, coupled=True,
-                            yaw=0.02, yaw_osc=0.20, pitch_drift=0.00),
-    "GALLOP":          dict(neck_amp=0.900, back_amp=0.850, freq=4.20, coupled=True,
-                            yaw=0.03, yaw_osc=0.30, pitch_drift=0.00),
-    "SNIFF":           dict(neck_amp=0.150, back_amp=0.035, freq=1.40, coupled=False,
-                            yaw=0.05, yaw_osc=0.20, pitch_drift=-0.30),
+                            yaw=0.00, yaw_osc=0.01, pitch_offset=0.00, pitch_drift=0.00),
+    "STAND":           dict(neck_amp=0.060, back_amp=0.055, freq=0.80, coupled=True,
+                            yaw=0.00, yaw_osc=0.03, pitch_offset=0.00, pitch_drift=0.00),
+    # SIT is model-only: the rules fallback cannot separate sitting from standing
+    # without a per-dog posture reference. Kept so --syndrome sequences can use
+    # it once ML.CLASSIFICATION is trained.
+    "SIT":             dict(neck_amp=0.040, back_amp=0.035, freq=0.60, coupled=True,
+                            yaw=0.00, yaw_osc=0.02, pitch_offset=0.00, pitch_drift=0.00),
+    "WALK":            dict(neck_amp=0.620, back_amp=0.580, freq=2.20, coupled=True,
+                            yaw=0.02, yaw_osc=0.06, pitch_offset=0.00, pitch_drift=0.00),
+    "TROT":            dict(neck_amp=1.000, back_amp=0.940, freq=3.40, coupled=True,
+                            yaw=0.02, yaw_osc=0.06, pitch_offset=0.00, pitch_drift=0.00),
+    "GALLOP":          dict(neck_amp=1.750, back_amp=1.650, freq=4.20, coupled=True,
+                            yaw=0.03, yaw_osc=0.08, pitch_offset=0.00, pitch_drift=0.00),
+    # head down, body still: decoupled, modest neck activity, negative pitch
+    "SNIFF":           dict(neck_amp=0.220, back_amp=0.045, freq=1.40, coupled=False,
+                            yaw=0.04, yaw_osc=0.10, pitch_offset=-0.55, pitch_drift=0.00),
     # neck-dominant: the back barely moves, so the two channels decouple
-    "SCRATCH":         dict(neck_amp=0.620, back_amp=0.045, freq=7.00, coupled=False,
-                            yaw=0.00, yaw_osc=0.40, pitch_drift=0.00),
-    "SHAKE":           dict(neck_amp=1.250, back_amp=0.090, freq=11.0, coupled=False,
-                            yaw=0.00, yaw_osc=1.20, pitch_drift=0.00),
+    "SCRATCH":         dict(neck_amp=1.500, back_amp=0.050, freq=7.00, coupled=False,
+                            yaw=0.00, yaw_osc=0.30, pitch_offset=0.00, pitch_drift=0.00),
+    "SHAKE":           dict(neck_amp=2.900, back_amp=0.090, freq=11.0, coupled=False,
+                            yaw=0.00, yaw_osc=0.80, pitch_offset=0.00, pitch_drift=0.00),
     # derived-state geometry
-    "PACE":            dict(neck_amp=0.230, back_amp=0.210, freq=2.20, coupled=True,
-                            yaw=0.00, yaw_osc=0.90, pitch_drift=0.00),   # yaw cancels
+    "PACE":            dict(neck_amp=0.620, back_amp=0.580, freq=2.20, coupled=True,
+                            yaw=0.00, yaw_osc=0.90, pitch_offset=0.00, pitch_drift=0.00),
     "CIRCLE":          dict(neck_amp=0.120, back_amp=0.100, freq=1.20, coupled=True,
-                            yaw=0.85, yaw_osc=0.10, pitch_drift=0.00),   # yaw sustained
-    "PAUSE":           dict(neck_amp=0.030, back_amp=0.028, freq=0.50, coupled=True,
-                            yaw=0.00, yaw_osc=0.02, pitch_drift=0.00),
+                            yaw=0.85, yaw_osc=0.05, pitch_offset=0.00, pitch_drift=0.00),
+    # still, but not lying: pitch variance above the REST ceiling and below the
+    # SLOW_TRANSITION floor, so the rules classifier says STAND and the context
+    # rung can promote it to PAUSE between two locomotion epochs
+    "PAUSE":           dict(neck_amp=0.085, back_amp=0.080, freq=0.50, coupled=True,
+                            yaw=0.00, yaw_osc=0.02, pitch_offset=0.00, pitch_drift=0.00),
     "SLOW_TRANSITION": dict(neck_amp=0.090, back_amp=0.080, freq=0.45, coupled=True,
-                            yaw=0.05, yaw_osc=0.08, pitch_drift=1.10),   # pitch swings
+                            yaw=0.05, yaw_osc=0.06, pitch_offset=0.00, pitch_drift=1.10),
 }
 
 # Sequences that satisfy each syndrome's tuned pattern, with slack so a single
@@ -114,30 +141,39 @@ def synth_second(state: str, t_offset: float, rng: np.random.Generator) -> np.nd
     # not, and the back channel carries only its own small independent motion.
     back_phase = phase if r["coupled"] else 2 * math.pi * 0.7 * (t + t_offset * 1.7)
 
-    def noise(scale: float) -> np.ndarray:
-        return rng.normal(0.0, scale, SR)
+    n_amp, b_amp = r["neck_amp"], r["back_amp"]
+
+    # Sensor noise scales with the motion rather than sitting at a fixed floor.
+    # A fixed floor swamps a resting dog: at REST the whole signal is smaller
+    # than the noise, pitch variance climbs above its ceiling, and a sleeping
+    # dog classifies as a slow postural transition.
+    def noise(amp: float) -> np.ndarray:
+        return rng.normal(0.0, max(0.004, 0.03 * amp), SR)
 
     # Gravity sits on z. pitch_drift tilts the neck sensor across the second,
     # which is what makes SLOW_TRANSITION show high pitch variance at low
     # magnitude — a dog levering itself up rather than springing.
-    tilt = r["pitch_drift"] * (t - 0.5)
+    tilt = r["pitch_drift"] * (t - 0.5) + r["pitch_offset"]
 
-    n_amp, b_amp = r["neck_amp"], r["back_amp"]
-    neck_ax = n_amp * np.sin(phase) + tilt + noise(0.012)
-    neck_ay = n_amp * 0.55 * np.cos(phase * 1.3) + noise(0.012)
-    neck_az = 1.0 + n_amp * 0.40 * np.sin(phase * 0.9) + noise(0.012)
+    neck_ax = n_amp * np.sin(phase) + tilt + noise(n_amp)
+    neck_ay = n_amp * 0.55 * np.cos(phase * 1.3) + noise(n_amp)
+    neck_az = 1.0 + n_amp * 0.40 * np.sin(phase * 0.9) + noise(n_amp)
 
-    back_ax = b_amp * np.sin(back_phase) + noise(0.010)
-    back_ay = b_amp * 0.55 * np.cos(back_phase * 1.3) + noise(0.010)
-    back_az = 1.0 + b_amp * 0.40 * np.sin(back_phase * 0.9) + noise(0.010)
+    back_ax = b_amp * np.sin(back_phase) + noise(b_amp)
+    back_ay = b_amp * 0.55 * np.cos(back_phase * 1.3) + noise(b_amp)
+    back_az = 1.0 + b_amp * 0.40 * np.sin(back_phase * 0.9) + noise(b_amp)
 
-    yaw = r["yaw"] + r["yaw_osc"] * np.sin(2 * math.pi * 0.5 * (t + t_offset))
-    neck_gx = r["yaw_osc"] * np.sin(phase) + noise(0.02)
-    neck_gy = r["yaw_osc"] * np.cos(phase) + noise(0.02)
-    neck_gz = yaw + noise(0.02)
-    back_gx = r["yaw_osc"] * 0.5 * np.sin(back_phase) + noise(0.02)
-    back_gy = r["yaw_osc"] * 0.5 * np.cos(back_phase) + noise(0.02)
-    back_gz = yaw + noise(0.02)      # yaw is a whole-body property
+    # Integer cycles per epoch, so the oscillating part integrates to zero over
+    # the second no matter where the epoch boundary falls. Without that,
+    # yaw_consistency = |mean| / mean|·| is an artefact of phase and CIRCLE
+    # fires on scratching.
+    yaw = r["yaw"] + r["yaw_osc"] * np.sin(2 * math.pi * YAW_OSC_HZ * (t + t_offset))
+    neck_gx = r["yaw_osc"] * np.sin(phase) + noise(0.05)
+    neck_gy = r["yaw_osc"] * np.cos(phase) + noise(0.05)
+    neck_gz = yaw + noise(0.05)
+    back_gx = r["yaw_osc"] * 0.5 * np.sin(back_phase) + noise(0.05)
+    back_gy = r["yaw_osc"] * 0.5 * np.cos(back_phase) + noise(0.05)
+    back_gz = yaw + noise(0.05)      # yaw is a whole-body property
 
     return np.column_stack([
         neck_ax, neck_ay, neck_az, neck_gx, neck_gy, neck_gz,
