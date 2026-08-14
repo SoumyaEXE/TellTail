@@ -13,7 +13,7 @@ syndromes expressed as regular expressions over rows** using `MATCH_RECOGNIZE`.
 
 Not *"scratching is high today."* Instead:
 
-```
+```text
 head shake, scratch cluster, head shake, scratch cluster, emerging from rest
 ```
 
@@ -42,13 +42,11 @@ which is otitis and nothing else.
 
 ```bash
 git clone https://github.com/SoumyaEXE/telltail && cd telltail
-cp .env.example .env                     # Snowflake creds, devnet keypair
+cp .env.example .env                     # fill in Snowflake creds
 pip install -r requirements.txt && npm install
 
-kaggle datasets download -d benjamingray44/inertial-data-for-dog-behaviour-classification
-unzip inertial-data-for-dog-behaviour-classification.zip -d ./data/
-
 python scripts/smoke_test.py             # 90s: does MATCH_RECOGNIZE + Cortex work here?
+python scripts/fetch_dataset.py          # 454 MB corpus, resumable
 python scripts/profile_dataset.py        # GATE A. writes ref/column_map.json
 python scripts/load_raw.py               # 10.6M rows -> Snowflake
 python scripts/run_sql.py --all          # schemas, DAG, models, patterns, tasks
@@ -58,8 +56,22 @@ python scripts/austin_sync.py            # shelter ground truth
 npm run keygen && npm run bridge         # queue -> signed devnet writes
 ```
 
-**Run the two smoke tests before anything else.** If `MATCH_RECOGNIZE` or Cortex
-fails on your account or region, you need to know at hour zero, not hour thirty.
+**Run `smoke_test.py` before anything else.** It checks `MATCH_RECOGNIZE`,
+Cortex, all three ML function classes, `ASOF JOIN`, dynamic-table creation and
+your remaining credit in about ninety seconds. If the row-pattern engine or
+Cortex is unavailable on your account or region, you need to know at hour zero,
+not hour thirty.
+
+Two things it will tell you that are easy to get wrong:
+
+- **`SNOWFLAKE_ACCOUNT` is the account identifier, not the URL.** For
+  `https://abcdefg-xy12345.snowflakecomputing.com` it is `abcdefg-xy12345`.
+- **`CORTEX_MODEL` must be a model your region actually serves.** Model ids
+  differ by region and change over time; the smoke test names the one it used,
+  and it is a single `.env` line rather than a grep across ten SQL files.
+
+`fetch_dataset.py` needs no Kaggle CLI and no `kaggle.json` — the mirror is
+publicly downloadable, and the download resumes if it drops.
 
 ---
 
@@ -97,7 +109,7 @@ never fires"* with no error anywhere.
 
 ## Architecture
 
-```
+```text
 Kaggle CSV --replay--> Snowflake --ML--> Snowflake --pattern--> Snowflake --attest--> Solana
 10.6M rows @ 100Hz     VARIANT land      CLASSIFICATION         MATCH_RECOGNIZE       devnet
 45 dogs, 27 breeds     Dynamic Tables    dog-disjoint folds     syndrome catalogue    claim not data
@@ -131,7 +143,7 @@ claim, never the data.*
 
 ### Lineage
 
-```
+```text
 RAW.COLLAR_TELEMETRY  (100 Hz, live micro-batches)
   └── STAGING.EPOCH_FEATURES          [Dynamic Table, TARGET_LAG '1 minute']
         └── MARTS.EPOCH_STATES        [Dynamic Table]  classifier + state ladder
@@ -253,7 +265,7 @@ straight from `ALL ROWS PER MATCH` + `CLASSIFIER()`.
 
 ## Repository
 
-```
+```text
 telltail/
   warehouse/          00 → 11, numbered, idempotent, runnable start to finish
     streamlit_app.py  nine tabs
