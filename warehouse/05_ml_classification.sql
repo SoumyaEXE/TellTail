@@ -24,12 +24,22 @@ USE SCHEMA ML;
 -- Leaving dog_id in the feature vector would let the model learn "dog 23 mostly
 -- trots" and would invalidate the entire holdout protocol.
 -- ---------------------------------------------------------------------------
+-- STATE RESOLUTION FALLS BACK TO THE SECONDARY ANNOTATION, and it has to.
+--
+-- The dataset carries up to three simultaneous behaviour annotations, and the
+-- POSTURE is not always in the first one. 'Panting' is the primary annotation
+-- for 836K rows, and it is a respiratory behaviour rather than a posture — the
+-- actual posture sits in Behavior_2 (48% Sitting, 48% Standing, 4% Lying).
+-- Mapping Panting to any single posture would be wrong about half the time on
+-- 7.9% of the corpus; dropping those rows would throw away the same 7.9%.
+-- COALESCE over the two columns recovers the true posture instead.
 CREATE OR REPLACE VIEW ML.V_LABELLED_EPOCHS AS
 SELECT
     e.dog_id,
     e.test_num,
     e.epoch_ts,
-    m.state                                            AS state,
+    COALESCE(m1.state, m2.state)                       AS state,
+    IFF(m1.state IS NULL, 'label_secondary', 'label_primary') AS label_source,
 
     -- ---- feature vector (25 columns) ----
     e.vm_neck_mean, e.vm_neck_std, e.vm_neck_range, e.energy_neck, e.sma_neck,
@@ -40,12 +50,14 @@ SELECT
     e.pitch_neck_mean, e.pitch_var, e.roll_neck_mean, e.roll_var, e.pitch_back_mean,
     e.neck_back_corr, e.neck_dominance, e.activity_index
 FROM STAGING.V_EPOCH_ALL e
-JOIN REF.LABEL_MAP m
-      ON m.raw_label = e.label_primary
-     AND m.source_column = 'label_primary'
+LEFT JOIN REF.LABEL_MAP m1
+       ON m1.raw_label = e.label_primary
+      AND m1.source_column = 'label_primary'
+LEFT JOIN REF.LABEL_MAP m2
+       ON m2.raw_label = e.label_secondary
+      AND m2.source_column = 'label_secondary'
 CROSS JOIN REF.V_PARAM p
-WHERE m.state IS NOT NULL
-  AND e.label_primary IS NOT NULL
+WHERE COALESCE(m1.state, m2.state) IS NOT NULL
   AND e.n_samples >= p.o:epoch_min_samples::NUMBER   -- quality gate
   AND e.neck_back_corr IS NOT NULL                   -- a constant epoch has no correlation
   AND NOT e.is_synthetic;                            -- training NEVER fits injected rows

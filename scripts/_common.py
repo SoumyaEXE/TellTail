@@ -29,9 +29,13 @@ _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 # glyphs — and Python raises UnicodeEncodeError rather than degrading, so a
 # decorative character aborts the build. Try UTF-8 first; if the stream will not
 # take it, fall back to an ASCII glyph set instead of crashing.
+# line_buffering matters when stdout is redirected to a file or a pipe: Python
+# switches to block buffering there, so a long-running profile or load shows
+# nothing at all until it finishes or fills 8 KB. Progress you cannot see is
+# indistinguishable from a hang.
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # type: ignore[union-attr]
 except Exception:  # noqa: BLE001 - older Python, or a stream that is not a TextIO
     pass
 

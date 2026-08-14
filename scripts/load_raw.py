@@ -123,6 +123,20 @@ def load_dog_info(conn, csv_path: Path, colmap: dict) -> int:
     df = pd.read_csv(csv_path)
     rename = {actual: canon for canon, actual in info_cols.items()}
     df = df.rename(columns=rename)
+
+    # Age is stored in MONTHS in this dataset ("Age months"). Convert once, here,
+    # rather than letting a 76-month Belgian Shepherd reach REF.V_DOG_COHORT and
+    # land in the 'senior' band at six years of overstatement.
+    if "age_months" in df.columns and "age_years" not in df.columns:
+        df["age_years"] = pd.to_numeric(df["age_months"], errors="coerce") / 12.0
+        info("age converted from months to years")
+
+    # Gender is coded 1 = female, 2 = male (Data_description.txt). Mapped so the
+    # Drivers tab reports a dimension called 'female', not a dimension called 2.
+    if "sex" in df.columns:
+        from profile_dataset import SEX_CODES
+        df["sex"] = df["sex"].map(lambda v: SEX_CODES.get(v, SEX_CODES.get(str(v), None)))
+
     want = ["dog_id", "breed", "sex", "age_years", "weight_kg", "height_cm"]
     for c in want:
         if c not in df.columns:

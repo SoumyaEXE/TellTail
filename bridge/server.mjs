@@ -52,6 +52,7 @@ const POLL_MS = Number(process.env.BRIDGE_POLL_SECONDS || 15) * 1000;
 const BATCH = Number(process.env.BRIDGE_BATCH_SIZE || 5);
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
 const PROGRAM_ID = (process.env.TELLTAIL_PROGRAM_ID || "").trim();
+const AUTHORITY = (process.env.SOLANA_AUTHORITY || "").trim();
 
 snowflake.configure({ logLevel: "ERROR" });
 
@@ -158,9 +159,15 @@ function buildInstruction(payer, payloadJson, subject) {
 
 async function publish(conn, connection, keypair, row) {
   const publishId = row.PUBLISH_ID;
-  const payload =
-    typeof row.PAYLOAD === "string" ? row.PAYLOAD : JSON.stringify(row.PAYLOAD);
   const parsed = typeof row.PAYLOAD === "string" ? JSON.parse(row.PAYLOAD) : row.PAYLOAD;
+
+  // The publishing authority travels with the claim. Snowflake builds the
+  // clinical half of the payload and knows nothing about wallets; the bridge
+  // adds who published it, because the bridge is what publishes. A reader can
+  // then check the claim came from the wallet TELLTAIL says it operates,
+  // independently of which key happened to pay the fee.
+  if (AUTHORITY) parsed.authority = AUTHORITY;
+  const payload = JSON.stringify(parsed);
 
   const { mode, ix, pda } = buildInstruction(keypair.publicKey, payload, parsed.subject || "");
 
@@ -248,13 +255,33 @@ async function main() {
 
   const keypair = loadKeypair();
   const connection = new Connection(RPC_URL, "confirmed");
-  console.log(`  signer     ${keypair.publicKey.toBase58()}`);
+  const signer = keypair.publicKey.toBase58();
+  console.log(`  signer     ${signer}`);
+
+  if (AUTHORITY) {
+    if (AUTHORITY === signer) {
+      console.log(`  authority  ${AUTHORITY}  (same wallet signs and publishes)`);
+    } else {
+      console.log(`  authority  ${AUTHORITY}  (recorded in the payload)`);
+      console.log("             the authority wallet is NOT the signer. To make it");
+      console.log("             the on-chain fee payer, export its keypair to");
+      console.log(`             ${process.env.SOLANA_KEYPAIR_PATH || "./secrets/devnet.json"}`);
+      console.log("             (a file — never paste a secret key into a terminal).");
+    }
+  }
 
   const balance = await connection.getBalance(keypair.publicKey);
   console.log(`  balance    ${balance / LAMPORTS_PER_SOL} SOL`);
   if (balance === 0 && !DRY) {
-    console.error("  signer has no SOL. Run: npm run keygen, or");
-    console.error(`  solana airdrop 1 ${keypair.publicKey.toBase58()} --url devnet`);
+    console.error("");
+    console.error("  The signer has no devnet SOL, so it cannot pay a fee. Either:");
+    console.error(`    1. fund it from the authority wallet:`);
+    console.error(`         solana transfer ${signer} 0.5 --url devnet --allow-unfunded-recipient`);
+    console.error(`    2. or use the faucet:  https://faucet.solana.com`);
+    console.error(`    3. or export the authority wallet's keypair to`);
+    console.error(`         ${process.env.SOLANA_KEYPAIR_PATH || "./secrets/devnet.json"}`);
+    console.error("");
+    console.error("  Meanwhile `npm run bridge:dry` shows exactly what would be signed.");
     process.exit(1);
   }
 

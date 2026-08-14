@@ -77,15 +77,44 @@ INFO_RESOLVERS: dict[str, list[str]] = {
     "dog_id":    [r"^dogid$", r"^dog$", r"^subjectid$"],
     "breed":     [r"^breed$", r"^dogbreed$"],
     "sex":       [r"^sex$", r"^gender$"],
-    "age_years": [r"^age$", r"^ageyears$", r"^agey$"],
+    "age_years": [r"^ageyears$", r"^agey$", r"^age$"],
+    # This dataset stores age in MONTHS ("Age months"). Resolved as its own
+    # canonical column so the unit is explicit and the conversion happens once,
+    # in the loader, instead of a 76-year-old Belgian Shepherd reaching the
+    # cohort bands.
+    "age_months": [r"^agemonths?$", r"^agemo$", r"^agemonth$"],
     "weight_kg": [r"^weight$", r"^weightkg$", r"^masskg$"],
     "height_cm": [r"^height$", r"^heightcm$", r"^witherheight$"],
+    "neutered":  [r"^neuteringstatus$", r"^neutered$", r"^neuterstatus$"],
 }
+
+# Gender is coded numerically in DogInfo.csv: 1 = female, 2 = male
+# (Data_description.txt). Mapped on load so REF.DOG_INFO.sex reads as a label
+# and the Drivers tab does not report a dimension called "2".
+SEX_CODES = {1: "female", 2: "male", "1": "female", "2": "male"}
 
 # Canonical states TELLTAIL's syndrome catalogue is written against.
 ETHOGRAM_STATES = [
     "REST", "SIT", "STAND", "WALK", "TROT", "GALLOP",
     "SNIFF", "PLAY", "SHAKE", "SCRATCH", "PACE", "CIRCLE",
+]
+
+# Labels that are NOT postures and must never become an ethogram state.
+# Checked before LABEL_HINTS, so a substring cannot sneak them in.
+#
+#   Panting          a respiratory behaviour, not a posture. In this dataset it
+#                    is the PRIMARY annotation for 836K rows while the actual
+#                    posture sits in Behavior_2 (48% Sitting, 48% Standing).
+#                    Mapping it to a posture would be wrong about half the time;
+#                    ML.V_LABELLED_EPOCHS falls back to the secondary column
+#                    instead and recovers the true posture.
+#   Synchronization  sensor calibration markers, not animal behaviour at all.
+#   Bark             a vocalisation point-event with no postural meaning.
+LABEL_EXCLUDE = [
+    r"^panting$",
+    r"synchroni",
+    r"^bark$",
+    r"^<undefined>$",
 ]
 
 # Raw-label -> state guesses, applied only to labels actually observed. Anything
@@ -98,6 +127,7 @@ LABEL_HINTS: list[tuple[str, str]] = [
     (r"stand",                        "STAND"),
     (r"\bsit",                        "SIT"),
     (r"ly(ing)?.*(chest|down|side)",  "REST"),
+    (r"lie[ -]?down",             "REST"),
     (r"^lying$|^lie",                 "REST"),
     (r"rest|sleep",                   "REST"),
     (r"sniff|treat.?search|search",   "SNIFF"),
@@ -106,7 +136,6 @@ LABEL_HINTS: list[tuple[str, str]] = [
     (r"shak|shudder",                 "SHAKE"),
     (r"scratch|itch",                 "SCRATCH"),
     (r"circl|spin|turn",              "CIRCLE"),
-    (r"pant",                         "STAND"),
     (r"carry",                        "WALK"),
 ]
 
@@ -154,6 +183,9 @@ def propose_state(label: str) -> str | None:
     low = str(label).strip().lower()
     if not low or low in {"nan", "none", "null", "<undefined>", "undefined", "-"}:
         return None
+    for pat in LABEL_EXCLUDE:
+        if re.search(pat, low):
+            return None
     for pat, state in LABEL_HINTS:
         if re.search(pat, low):
             return state
@@ -363,17 +395,31 @@ def profile_info(csv_path: Path) -> dict[str, Any]:
         print(f"\n  {df[breed_col].nunique()} distinct breeds")
         for b, c in df[breed_col].value_counts().items():
             print(f"      {b!r:<32} {c}")
-    for num in ("age_years", "weight_kg", "height_cm"):
+
+    for num in ("age_years", "age_months", "weight_kg", "height_cm"):
         col = mapping.get(num)
         if col and pd.api.types.is_numeric_dtype(df[col]):
             s = df[col]
             print(f"  {num:<12} mean={s.mean():.2f} min={s.min():.2f} max={s.max():.2f}")
+
+    if mapping.get("age_months") and not mapping.get("age_years"):
+        m = df[mapping["age_months"]]
+        print(f"  -> age is in MONTHS; the loader divides by 12 "
+              f"({m.mean() / 12:.1f}y mean, {m.min() / 12:.1f}–{m.max() / 12:.1f}y range)")
+
+    sex_col = mapping.get("sex")
+    if sex_col:
+        vals = df[sex_col].value_counts().to_dict()
+        print(f"  sex codes    {vals}  -> mapped via SEX_CODES "
+              f"{{1: 'female', 2: 'male'}}")
 
     return {
         "info_columns": {k: v for k, v in mapping.items() if v},
         "info_unmatched": unmatched,
         "info_row_count": len(df),
         "info_breeds": int(df[breed_col].nunique()) if breed_col else None,
+        "info_age_unit": "months" if mapping.get("age_months") else "years",
+        "info_sex_codes": SEX_CODES,
     }
 
 
