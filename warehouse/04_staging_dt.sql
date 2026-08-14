@@ -283,7 +283,30 @@ CREATE TABLE IF NOT EXISTS STAGING.EPOCH_FEATURES_BULK LIKE STAGING.EPOCH_FEATUR
 
 -- The union both the classifier and the pattern layer read. Live rows win on
 -- collision because they are the ones the demo is watching.
-CREATE OR REPLACE VIEW STAGING.V_EPOCH_ALL AS
+--
+-- WHY THIS IS A DYNAMIC TABLE AND NOT A VIEW. It was a view, and MARTS.EPOCH_STATES
+-- failed to compile against it:
+--
+--   Dynamic Tables do not support reading from views containing objects of
+--   type DYNAMIC_TABLE, found in V_EPOCH_ALL
+--
+-- A dynamic table may read another dynamic table directly — that is the whole
+-- point of the DAG — but it may not reach one through a view. Probed all three
+-- shapes against this account before rewriting: DT→DT, DT→(DT ∪ base table),
+-- and DT→model PREDICT all compile; only the view wrapper is refused. So the
+-- union becomes a node in the DAG rather than a lens over it.
+--
+-- TARGET_LAG = DOWNSTREAM: this table has no freshness requirement of its own.
+-- It is fresh exactly when something that reads it needs it to be, and
+-- Snowflake derives the schedule from the leaf lags. Pinning '1 minute' here
+-- would refresh the whole chain on a timer whether or not anyone was looking.
+CREATE OR REPLACE DYNAMIC TABLE STAGING.EPOCH_ALL
+    TARGET_LAG   = DOWNSTREAM
+    WAREHOUSE    = ${SNOWFLAKE_WAREHOUSE}
+    REFRESH_MODE = FULL
+    INITIALIZE   = ON_CREATE
+    COMMENT      = 'Live epochs unioned over the bulk corpus. Live wins on collision.'
+AS
 SELECT *, 'LIVE'::STRING AS source FROM STAGING.EPOCH_FEATURES
 UNION ALL
 SELECT b.*, 'BULK'::STRING AS source
@@ -292,6 +315,12 @@ WHERE NOT EXISTS (
     SELECT 1 FROM STAGING.EPOCH_FEATURES l
     WHERE l.dog_id = b.dog_id AND l.test_num = b.test_num AND l.epoch_ts = b.epoch_ts
 );
+
+-- Compatibility lens for everything that is NOT a dynamic table: the Gate C
+-- views below, the ML views in 05, the dashboard. Views reading dynamic tables
+-- are fine — the restriction runs the other way.
+CREATE OR REPLACE VIEW STAGING.V_EPOCH_ALL AS
+SELECT * FROM STAGING.EPOCH_ALL;
 
 -- ---------------------------------------------------------------------------
 -- GATE C VALIDATION. Run these before trusting the feature.
