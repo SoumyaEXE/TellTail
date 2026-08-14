@@ -209,13 +209,20 @@ SELECT
     --
     -- This removes speckle. It does not invent states, and it does not remove
     -- findings.
+    -- The window spec is written out at each use rather than declared once in a
+    -- named WINDOW clause: Snowflake does not support SQL's WINDOW clause, and
+    -- the failure is a bare "unexpected 'w'" with no mention of why.
     CASE
         WHEN NOT COALESCE(e.singleton_diagnostic, TRUE)
-         AND LAG(l.state_raw)  OVER w = LEAD(l.state_raw) OVER w
-         AND LAG(l.state_raw)  OVER w <> l.state_raw
-         AND LAG(l.state_raw)  OVER w IS NOT NULL
-         AND LEAD(l.state_raw) OVER w IS NOT NULL
-        THEN LAG(l.state_raw) OVER w
+         AND LAG(l.state_raw)  OVER (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts)
+           = LEAD(l.state_raw) OVER (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts)
+         AND LAG(l.state_raw)  OVER (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts)
+          <> l.state_raw
+         AND LAG(l.state_raw)  OVER (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts)
+             IS NOT NULL
+         AND LEAD(l.state_raw) OVER (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts)
+             IS NOT NULL
+        THEN LAG(l.state_raw) OVER (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts)
         ELSE l.state_raw
     END                                                            AS state,
 
@@ -226,8 +233,7 @@ SELECT
     LEAST(1.0, l.n_samples / 100.0)                                AS quality,
     IFF(l.state_source IN ('MODEL','RULES'), 1, 0)                 AS is_model
 FROM laddered l
-LEFT JOIN REF.ETHOGRAM e ON e.state = l.state_raw
-WINDOW w AS (PARTITION BY l.dog_id, l.test_num ORDER BY l.epoch_ts);
+LEFT JOIN REF.ETHOGRAM e ON e.state = l.state_raw;
 
 -- The exact row set the pattern layer scans. Narrow on purpose: MATCH_RECOGNIZE
 -- reads every column of every row in the partition, so carrying 25 features
