@@ -426,7 +426,12 @@ SELECT
     c.state                                           AS current_state,
     c.state_source                                    AS current_state_source,
     c.epoch_ts                                        AS last_epoch_ts,
-    DATEDIFF('second', c.epoch_ts, CURRENT_TIMESTAMP()) AS seconds_since_last_epoch,
+    -- Staleness is measured against the PIPELINE's clock, not the wall clock.
+    -- The replayer stamps sample_ts in dog time and pushes it faster than real
+    -- time at --speed > 1, so MAX(epoch_ts) runs ahead of CURRENT_TIMESTAMP()
+    -- and a wall-clock comparison would report every dog as negatively stale.
+    DATEDIFF('second', c.epoch_ts,
+             (SELECT MAX(epoch_ts) FROM MARTS.EPOCH_STATES)) AS seconds_since_last_epoch,
     ROUND(dev.z_self_recent, 3)                       AS z_self,
     ROUND(dev.z_cohort_recent, 3)                     AS z_cohort,
     e.epochs_total,
