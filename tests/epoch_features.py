@@ -156,6 +156,7 @@ def ladder_state(
     *,
     has_shake: bool = False,
     has_scratch: bool = False,
+    has_pace: bool = False,
     loco_before: bool = False,
     loco_after: bool = False,
 ) -> tuple[str, str]:
@@ -177,7 +178,8 @@ def ladder_state(
             and f["yaw_abs_mean"] >= p["circle_yaw_activity_min"]
             and dyn_back <= p["circle_translation_max"]):
         return "CIRCLE", "GEOMETRY"
-    if (model in ("WALK", "TROT")
+    if (not has_pace
+            and model in ("WALK", "TROT")
             and f["yaw_consistency"] <= p["pace_yaw_consistency_max"]
             and f["yaw_abs_mean"] >= p["pace_yaw_activity_min"]):
         return "PACE", "GEOMETRY"

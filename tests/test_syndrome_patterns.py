@@ -70,9 +70,41 @@ def extract_views() -> dict[str, dict[str, str]]:
     return out
 
 
+def strip_line_comments(sql: str) -> str:
+    """Remove `-- ...` comments, respecting single-quoted string literals.
+
+    The catalogue extractor below matches a VALUES tuple as one run of literals
+    separated by whitespace only, which cannot span a comment line. Commenting a pattern
+    where the pattern lives — the only place the comment is any use — therefore
+    made the row invisible to this suite, and three syndromes silently vanished
+    from every assertion here rather than failing one. Quote-aware because the
+    clinical prose in the catalogue contains apostrophes and dashes.
+    """
+    out, i, n, in_str = [], 0, len(sql), False
+    while i < n:
+        c = sql[i]
+        if in_str:
+            out.append(c)
+            if c == "'":
+                if i + 1 < n and sql[i + 1] == "'":
+                    out.append(sql[i + 1]); i += 2; continue
+                in_str = False
+            i += 1
+        elif c == "'":
+            in_str = True; out.append(c); i += 1
+        elif c == "-" and i + 1 < n and sql[i + 1] == "-":
+            j = sql.find(chr(10), i)
+            if j == -1:
+                break
+            i = j                      # keep the newline itself
+        else:
+            out.append(c); i += 1
+    return "".join(out)
+
+
 def extract_catalogue() -> dict[str, dict[str, str]]:
     """pattern_text / define_text out of the REF.SYNDROME_CATALOGUE insert."""
-    text = SQL_REF_SEED.read_text(encoding="utf-8")
+    text = strip_line_comments(SQL_REF_SEED.read_text(encoding="utf-8"))
     block = re.search(
         r"INSERT INTO REF\.SYNDROME_CATALOGUE(.*?)AS v\(column1", text, re.S
     )
@@ -98,7 +130,7 @@ def extract_catalogue() -> dict[str, dict[str, str]]:
 
 def extract_variants() -> dict[tuple[str, str], dict[str, str]]:
     """(code, variant) -> pattern text, out of REF.SYNDROME_VARIANTS."""
-    text = SQL_REF_SEED.read_text(encoding="utf-8")
+    text = strip_line_comments(SQL_REF_SEED.read_text(encoding="utf-8"))
     block = re.search(
         r"INSERT INTO REF\.SYNDROME_VARIANTS(.*?)AS v\(syndrome_code", text, re.S
     )
@@ -159,7 +191,10 @@ FIXTURES: dict[str, dict] = {
             "first bout one epoch short": seq(R(1), SH(1), SC(2), SH(1), SC(2)),
             "second bout one epoch short": seq(R(1), SH(1), SC(3), SH(1), SC(1)),
             "no head shake at all": seq(R(1), SC(12)),
-            "does not emerge from rest": seq(ST(1), SH(1), SC(3), SH(1), SC(2)),
+            # onset is any resting POSTURE (REST/SIT/STAND); locomotion is not
+            # one, so a bout that begins mid-walk still must not match.
+            "does not emerge from a resting posture":
+                seq(W(1), SH(1), SC(3), SH(1), SC(2)),
             "shake and scratch never alternate": seq(R(1), SH(2), SC(9)),
         },
         # engineered to satisfy tuned {3,}/{2,} but not strict {5,}/{4,}
@@ -380,7 +415,10 @@ def test_classifier_output_is_the_hero_caption():
         # every matched epoch's state satisfies its symbol's DEFINE
         for row, sym in zip(m.rows, m.symbols):
             col, want = cp.defines[sym]
-            assert row[col] == want, f"{code}: {sym} bound a {row[col]!r} epoch"
+            assert row[col] in want, (
+                f"{code}: {sym} bound a {row[col]!r} epoch, "
+                f"which is not in {sorted(want)}"
+            )
 
 
 def test_partitioning_prevents_cross_session_matches():

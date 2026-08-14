@@ -137,21 +137,27 @@ class CompiledPattern:
     pattern_text: str
     define_text: str
     symbols: list[str]                       # in pattern order, may repeat
-    defines: dict[str, tuple[str, str]]      # var -> (column, required value)
+    defines: dict[str, tuple[str, frozenset[str]]]  # var -> (column, accepted values)
     regex: re.Pattern[str]
-    _sym_to_char: dict[str, str] = field(repr=False, default_factory=dict)
+    _sym_to_chars: dict[str, frozenset[str]] = field(repr=False, default_factory=dict)
     _char_to_states: dict[str, str] = field(repr=False, default_factory=dict)
+    _val_to_char: dict[str, str] = field(repr=False, default_factory=dict)
+    _columns: tuple[str, ...] = field(repr=False, default=())
 
     def encode(self, rows: Sequence[dict[str, Any]]) -> str:
-        """One row -> one character. A row matching no symbol gets a character
-        that no symbol's character class contains, which is exactly right: it
-        can never participate in a match."""
+        """One row -> one character, keyed on the row's VALUE rather than on the
+        first symbol that accepts it. With set-valued DEFINEs several symbols
+        can accept the same row, so per-symbol encoding would pick one
+        arbitrarily and the regex would lose the alternatives. A row no symbol
+        accepts gets a character no symbol's class contains, which is exactly
+        right: it can never participate in a match."""
         out: list[str] = []
         for r in rows:
             ch = ""  # the "matches nothing" character
-            for var, (col, want) in self.defines.items():
-                if str(r.get(col)) == want:
-                    ch = self._sym_to_char[var]
+            for col in self._columns:
+                got = self._val_to_char.get(str(r.get(col)))
+                if got:
+                    ch = got
                     break
             out.append(ch)
         return "".join(out)
@@ -170,9 +176,10 @@ def compile_pattern(pattern_text: str, define_text: str) -> CompiledPattern:
     # same value (itch and itch2 both = 'SCRATCH') therefore share a character,
     # which is correct: a row satisfies both, and the regex decides which symbol
     # consumes it exactly as the matcher would.
-    values = sorted({v for _, v in defines.values()})
+    values = sorted({v for _, vs in defines.values() for v in vs})
     val_to_char = {v: chr(_ENCODE_BASE + i) for i, v in enumerate(values)}
-    sym_to_char = {var: val_to_char[val] for var, (_, val) in defines.items()}
+    sym_to_chars = {var: frozenset(val_to_char[v] for v in vs)
+                    for var, (_, vs) in defines.items()}
 
     parts: list[str] = []
     symbols: list[str] = []
@@ -192,7 +199,10 @@ def compile_pattern(pattern_text: str, define_text: str) -> CompiledPattern:
                 f"(defined: {sorted(defines)})"
             )
         symbols.append(var)
-        parts.append(re.escape(sym_to_char[var]) + (m.group("quant") or ""))
+        # A character CLASS, not a single character: a set-valued DEFINE accepts
+        # any of its states, and `[abc]` is how that composes with a quantifier.
+        cls = "[" + "".join(re.escape(c) for c in sorted(sym_to_chars[var])) + "]"
+        parts.append(cls + (m.group("quant") or ""))
         pos = m.end()
 
     if not parts:
@@ -204,8 +214,10 @@ def compile_pattern(pattern_text: str, define_text: str) -> CompiledPattern:
         symbols=symbols,
         defines=defines,
         regex=re.compile("".join(parts)),
-        _sym_to_char=sym_to_char,
+        _sym_to_chars=sym_to_chars,
         _char_to_states={c: v for v, c in val_to_char.items()},
+        _val_to_char=val_to_char,
+        _columns=tuple(dict.fromkeys(col for col, _ in defines.values())),
     )
 
 
@@ -280,9 +292,9 @@ def _assign_symbols(cp: CompiledPattern, encoded: str) -> list[str]:
         if ei == len(elements):
             return si == len(encoded)
         var, lo, hi = elements[ei]
-        ch = cp._sym_to_char[var]
+        chars = cp._sym_to_chars[var]
         avail = 0
-        while si + avail < len(encoded) and encoded[si + avail] == ch and avail < hi:
+        while si + avail < len(encoded) and encoded[si + avail] in chars and avail < hi:
             avail += 1
         for take in range(avail, lo - 1, -1):
             if take < lo:

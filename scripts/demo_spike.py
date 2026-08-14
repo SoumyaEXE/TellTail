@@ -75,6 +75,7 @@ SR = 100  # Hz, matching the corpus
 # Calibrated against the thresholds in REF.PARAMS by tests/test_demo_signal.py,
 # which fails if any recipe stops producing the state it claims.
 YAW_OSC_HZ = 2.0        # integer cycles per epoch => mean yaw contribution ~0
+GYRO_DPS   = 180.0      # recipe yaw is dimensionless shape; the corpus is deg/s
 
 RECIPES: dict[str, dict] = {
     "REST":            dict(neck_amp=0.010, back_amp=0.010, freq=0.30, coupled=True,
@@ -173,12 +174,19 @@ def synth_second(state: str, t_offset: float, rng: np.random.Generator) -> np.nd
     # yaw_consistency = |mean| / mean|·| is an artefact of phase and CIRCLE
     # fires on scratching.
     yaw = r["yaw"] + r["yaw_osc"] * np.sin(2 * math.pi * YAW_OSC_HZ * (t + t_offset))
-    neck_gx = r["yaw_osc"] * np.sin(phase) + noise(0.05)
-    neck_gy = r["yaw_osc"] * np.cos(phase) + noise(0.05)
-    neck_gz = yaw + noise(0.05)
-    back_gx = r["yaw_osc"] * 0.5 * np.sin(back_phase) + noise(0.05)
-    back_gy = r["yaw_osc"] * 0.5 * np.cos(back_phase) + noise(0.05)
-    back_gz = yaw + noise(0.05)      # yaw is a whole-body property
+    # GYRO_DPS puts the synthetic gyro in the corpus's units. The recipes above
+    # describe SHAPE — direction, steadiness, oscillation — on a dimensionless
+    # 0-1 scale; the corpus reports angular rate in DEGREES PER SECOND, where a
+    # resting dog reads 2.6 and a head shake reads 186. Without the conversion
+    # the synthetic feed sat ~180x below the real one, so every geometry
+    # threshold that is correct for real data rejected the demo signal, and
+    # CIRCLE and PACE could not be synthesised at all.
+    neck_gx = GYRO_DPS * r["yaw_osc"] * np.sin(phase) + noise(0.05)
+    neck_gy = GYRO_DPS * r["yaw_osc"] * np.cos(phase) + noise(0.05)
+    neck_gz = GYRO_DPS * yaw + noise(0.05)
+    back_gx = GYRO_DPS * r["yaw_osc"] * 0.5 * np.sin(back_phase) + noise(0.05)
+    back_gy = GYRO_DPS * r["yaw_osc"] * 0.5 * np.cos(back_phase) + noise(0.05)
+    back_gz = GYRO_DPS * yaw + noise(0.05)   # yaw is a whole-body property
 
     return np.column_stack([
         neck_ax, neck_ay, neck_az, neck_gx, neck_gy, neck_gz,
