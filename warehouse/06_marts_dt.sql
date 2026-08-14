@@ -35,7 +35,7 @@ USE SCHEMA MARTS;
 -- labelled compromise and punish the hidden one.
 -- ---------------------------------------------------------------------------
 
--- Are SHAKE and SCRATCH real labels in this dataset, or must they be derived?
+-- Which states are real labels in this dataset, and which must be derived?
 -- Answered from data, at refresh time, not assumed at authoring time.
 -- COALESCE is not decoration. Over an empty REF.LABEL_MAP, BOOLOR_AGG returns
 -- NULL; `NOT NULL` is NULL; the heuristic CASE branches below never match; and
@@ -45,7 +45,12 @@ USE SCHEMA MARTS;
 CREATE OR REPLACE VIEW MARTS.V_NECK_LABELS_PRESENT AS
 SELECT
     COALESCE(BOOLOR_AGG(state = 'SHAKE'), FALSE)   AS has_shake,
-    COALESCE(BOOLOR_AGG(state = 'SCRATCH'), FALSE) AS has_scratch
+    COALESCE(BOOLOR_AGG(state = 'SCRATCH'), FALSE) AS has_scratch,
+    -- PACE is annotated in this corpus (1.12% of labelled epochs), so the
+    -- classifier learns it directly and the geometry rung below must not
+    -- second-guess it. On a corpus without a pacing label the rung takes over.
+    -- Same contract as SHAKE and SCRATCH: derive only what is not observed.
+    COALESCE(BOOLOR_AGG(state = 'PACE'), FALSE)    AS has_pace
 FROM REF.LABEL_MAP
 WHERE state IS NOT NULL;
 
@@ -84,7 +89,7 @@ WITH base AS (
                      AND e.yaw_abs_mean    >= p.o:pace_yaw_activity_min::FLOAT),
             1, 0)                                    AS is_plain_loco,
         p.o AS prm,
-        nl.has_shake, nl.has_scratch
+        nl.has_shake, nl.has_scratch, nl.has_pace
     -- Dynamic tables, not the compatibility views over them: a dynamic table
     -- cannot read a view that contains one. REF.V_PARAM and
     -- MARTS.V_NECK_LABELS_PRESENT stay views because they sit over plain
@@ -129,7 +134,8 @@ laddered AS (
               AND dyn_back        <= prm:circle_translation_max::FLOAT
              THEN 'CIRCLE'
 
-             WHEN model_state IN ('WALK','TROT')
+             WHEN NOT has_pace
+              AND model_state IN ('WALK','TROT')
               AND yaw_consistency <= prm:pace_yaw_consistency_max::FLOAT
               AND yaw_abs_mean    >= prm:pace_yaw_activity_min::FLOAT
              THEN 'PACE'
@@ -170,7 +176,8 @@ laddered AS (
               AND yaw_abs_mean    >= prm:circle_yaw_activity_min::FLOAT
               AND dyn_back        <= prm:circle_translation_max::FLOAT
                                                                    THEN 'GEOMETRY'
-             WHEN model_state IN ('WALK','TROT')
+             WHEN NOT has_pace
+              AND model_state IN ('WALK','TROT')
               AND yaw_consistency <= prm:pace_yaw_consistency_max::FLOAT
               AND yaw_abs_mean    >= prm:pace_yaw_activity_min::FLOAT
                                                                    THEN 'GEOMETRY'

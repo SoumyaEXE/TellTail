@@ -173,10 +173,21 @@ SELECT * FROM VALUES
  ('pause_vm_std_max',         0.12, NULL, 'g',       'PAUSE: stillness ceiling on neck SD.'),
  ('pause_neighbour_epochs',   2,    NULL, 'epochs',  'PAUSE: locomotion must occur within this many epochs either side.'),
  ('pace_yaw_consistency_max', 0.35, NULL, 'ratio',   'PACE: |mean yaw| / mean|yaw| ceiling. Low = reversing direction.'),
- ('pace_yaw_activity_min',    0.25, NULL, 'rad/s',   'PACE: mean|yaw| floor, so standing still is not pacing.'),
- ('circle_yaw_consistency_min',0.70,NULL, 'ratio',   'CIRCLE: |mean yaw| / mean|yaw| floor. High = one direction.'),
- ('circle_yaw_activity_min',  0.35, NULL, 'rad/s',   'CIRCLE: mean|yaw| floor.'),
- ('circle_translation_max',   0.25, NULL, 'g',       'CIRCLE: dynamic back magnitude ceiling. Turning, not travelling.'),
+ -- UNITS. These four were authored blind, in rad/s and on the assumption that
+ -- yaw activity was normalised to roughly 0-1. The corpus reports gyroscope
+ -- rates in DEGREES per second: mean|yaw| is 2.6 at REST, 25.4 at the median,
+ -- 96.7 at p90, 185.8 during a head shake. A 0.35 floor therefore admitted
+ -- essentially every epoch, and CIRCLE claimed 20.59% of the timeline while
+ -- PACE claimed 15.20% — against a 1.12% pacing rate in the annotations. Both
+ -- were overwriting the WALK and TROT runs that four of the six syndromes are
+ -- built on, which is why only S4 and S6 could fire.
+ --
+ -- Retuned in the units the data is actually in, against the real
+ -- distribution: 0.85 / 60 / 0.08 selects 2.76% of epochs for CIRCLE.
+ ('pace_yaw_activity_min',      15, NULL, 'deg/s',   'PACE: mean|yaw| floor, so standing still is not pacing.'),
+ ('circle_yaw_consistency_min',0.85,NULL, 'ratio',   'CIRCLE: |mean yaw| / mean|yaw| floor. High = one direction.'),
+ ('circle_yaw_activity_min',    60, NULL, 'deg/s',   'CIRCLE: mean|yaw| floor. ~6s per revolution.'),
+ ('circle_translation_max',   0.08, NULL, 'g',       'CIRCLE: dynamic back magnitude ceiling. Turning, not travelling.'),
  ('slowrise_pitch_var_min',   0.10, NULL, 'rad',     'SLOW_TRANSITION: pitch SD floor. The dog is changing posture.'),
  ('slowrise_vm_std_max',      0.35, NULL, 'g',       'SLOW_TRANSITION: neck SD ceiling. Slowly, not springing up.'),
  -- baselines
