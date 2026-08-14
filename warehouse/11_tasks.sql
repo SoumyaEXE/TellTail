@@ -24,11 +24,26 @@
 --   T_ROOT (2 min)
 --     └─ T_SYNDROMES ────── MATCH_RECOGNIZE, all six patterns
 --          ├─ T_MATCH_ROWS ─ ALL ROWS PER MATCH symbol tagging
---          └─ T_SNAPSHOT ─── activity history + split boundary
---               ├─ T_ML ───── FORECAST + ANOMALY_DETECTION
---               │    └─ T_DRIVERS ── TOP_INSIGHTS
---               └─ T_AI ───── AI_COMPLETE -> AI_CLASSIFY -> AI_AGG
---                    └─ T_ATTEST ─── enqueue for the Solana bridge
+--          └─ T_SNAPSHOT ─── per-minute activity history
+--               └─ T_BOUNDARY ── fix the single train/detect split point
+--                    ├─ T_FORECAST ── ML.FORECAST
+--                    │    └─ T_ANOMALY ── ML.ANOMALY_DETECTION
+--                    │         └─ T_DRIVERS ── TOP_INSIGHTS
+--                    └─ T_NOTES ───── AI_COMPLETE
+--                         └─ T_TRIAGE ── AI_CLASSIFY over the cached notes
+--                              └─ T_BRIEF ── AI_AGG
+--                                   └─ T_ATTEST ── enqueue for the bridge
+--
+-- ONE PROCEDURE PER TASK, deliberately. A multi-statement `AS BEGIN ... END;`
+-- body is valid Snowflake, and it is also unparseable by any client that splits
+-- on semicolons — including scripts/run_sql.py, which would create the task with
+-- only its first CALL and then execute the rest as orphaned statements. That
+-- failure is silent: the task exists, it just does a third of its job.
+--
+-- Splitting into one call per task avoids the hazard entirely and buys a better
+-- DAG: each stage gets its own row in TASK_HISTORY with its own duration and
+-- return value, which is what makes the Pipeline tab legible.
+-- tests/run_all.py asserts no bare BEGIN survives outside a $$ block.
 --
 -- Every task is created suspended. RESUME order is children-first, root-last:
 -- Snowflake refuses to resume a child whose predecessor is suspended, and
@@ -73,50 +88,72 @@ AS
 CREATE OR REPLACE TASK ML.T_SNAPSHOT
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
     AFTER     MARTS.T_SYNDROMES
-    COMMENT   = 'Per-minute activity history + the single train/detect boundary.'
+    COMMENT   = 'Per-minute activity history. MERGE, so a re-run replaces rather than duplicates.'
 AS
-    BEGIN
-        CALL ML.SP_SNAPSHOT_ACTIVITY();
-        CALL ML.SP_SET_BOUNDARY();
-    END;
+    CALL ML.SP_SNAPSHOT_ACTIVITY();
 
-CREATE OR REPLACE TASK ML.T_ML
+CREATE OR REPLACE TASK ML.T_BOUNDARY
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
     AFTER     ML.T_SNAPSHOT
-    COMMENT   = 'FORECAST and ANOMALY_DETECTION. Strict boundary split, no overlap.'
+    COMMENT   = 'Fix the single train/detect split point, so the two views cannot disagree.'
 AS
-    BEGIN
-        CALL ML.SP_RUN_FORECAST();
-        CALL ML.SP_RUN_ANOMALY();
-    END;
+    CALL ML.SP_SET_BOUNDARY();
+
+CREATE OR REPLACE TASK ML.T_FORECAST
+    WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+    AFTER     ML.T_BOUNDARY
+    COMMENT   = 'ML.FORECAST on the per-dog activity index. Trains on ts < boundary.'
+AS
+    CALL ML.SP_RUN_FORECAST();
+
+CREATE OR REPLACE TASK ML.T_ANOMALY
+    WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+    AFTER     ML.T_FORECAST
+    COMMENT   = 'ML.ANOMALY_DETECTION. Detects on ts >= boundary. No window overlap.'
+AS
+    CALL ML.SP_RUN_ANOMALY();
 
 CREATE OR REPLACE TASK ML.T_DRIVERS
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     ML.T_ML
+    AFTER     ML.T_ANOMALY
     COMMENT   = 'TOP_INSIGHTS over the deviation metric. Produces a finding, not a chart.'
 AS
     CALL ML.SP_RUN_TOP_INSIGHTS();
 
 -- ---------------------------------------------------------------------------
--- The Cortex chain. Notes, then triage over the notes, then the pack brief.
--- Sequential inside one task because each stage reads the previous stage's
--- cached output, and because three separate schedules would triple the chance
--- of an unattended run burning the daily credit cap.
+-- The Cortex chain. Notes, then triage OVER those notes, then the pack brief
+-- over all of them. Strictly sequential because each stage reads the previous
+-- stage's cached table — triage classifies the generated note so the label and
+-- the document a human reads cannot disagree.
+--
+-- Chained rather than scheduled independently: three separate schedules would
+-- triple the chance of an unattended overnight run walking into the trial's
+-- daily AI Function credit cap.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TASK AI.T_AI
+CREATE OR REPLACE TASK AI.T_NOTES
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     ML.T_SNAPSHOT
-    COMMENT   = 'Batched Cortex. Capped, deduped, cached. Never called from a render path.'
+    AFTER     ML.T_BOUNDARY
+    COMMENT   = 'AI_COMPLETE: SOAP handoff notes. Capped, deduped on the finding key.'
 AS
-    BEGIN
-        CALL AI.SP_GENERATE_NOTES();
-        CALL AI.SP_GENERATE_TRIAGE();
-        CALL AI.SP_GENERATE_PACK_BRIEF();
-    END;
+    CALL AI.SP_GENERATE_NOTES();
+
+CREATE OR REPLACE TASK AI.T_TRIAGE
+    WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+    AFTER     AI.T_NOTES
+    COMMENT   = 'AI_CLASSIFY over the cached notes, not over the raw evidence.'
+AS
+    CALL AI.SP_GENERATE_TRIAGE();
+
+CREATE OR REPLACE TASK AI.T_BRIEF
+    WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+    AFTER     AI.T_TRIAGE
+    COMMENT   = 'AI_AGG: one pack-wide brief over every cached note.'
+AS
+    CALL AI.SP_GENERATE_PACK_BRIEF();
 
 CREATE OR REPLACE TASK ORACLE.T_ATTEST
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
-    AFTER     AI.T_AI
+    AFTER     AI.T_BRIEF
     COMMENT   = 'Stage findings for the bridge. Snowflake queues; it never signs.'
 AS
     CALL ORACLE.SP_ENQUEUE_ATTESTATIONS();
