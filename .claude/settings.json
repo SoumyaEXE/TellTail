@@ -11,7 +11,8 @@
       "Bash(python tests/test_syndrome_patterns.py)",
       "Bash(python tests/test_demo_signal.py)",
       "Bash(python tests/test_demo_signal.py --calibrate)",
-      "Bash(python \"C:/Users/Soumya/AppData/Local/Temp/claude/c--Users-Soumya-Desktop-telltail/98191729-086b-4139-80d8-bcfbe383ae82/scratchpad/hyp.py\")"
+      "Bash(python \"C:/Users/Soumya/AppData/Local/Temp/claude/c--Users-Soumya-Desktop-telltail/98191729-086b-4139-80d8-bcfbe383ae82/scratchpad/hyp.py\")",
+      "Bash(python scripts/run_sql.py --from 08)"
     ]
   }
 }
