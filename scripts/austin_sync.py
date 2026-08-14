@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -29,7 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import requests  # noqa: E402
 
-from _common import connect, env, header, info, load_env, ok, q, warn  # noqa: E402
+from _common import (  # noqa: E402
+    connect, env, header, info, load_env, ok, q, split_statements, warn,
+)
 
 INTAKES_URL = "https://data.austintexas.gov/resource/wter-evkm.json"
 OUTCOMES_URL = "https://data.austintexas.gov/resource/9t4d-g238.json"
@@ -160,12 +163,32 @@ def main() -> int:
         # One statement per execute(): the connector rejects a multi-statement
         # string unless num_statements is set, and we already own a splitter that
         # understands $$ blocks and embedded semicolons.
-        built = 0
+        #
+        # V_SHELTER_PUNCHLINE joins MARTS.SYNDROME_MATCHES, which only exists
+        # once warehouse/07 has run. This script is legitimately runnable before
+        # that — the shelter tables are independent of the telemetry — so a
+        # forward dependency is a warning, not a failure. Re-run after the
+        # pipeline build and it resolves.
+        built, deferred = 0, []
         with conn.cursor() as cur:
             for stmt in split_statements(SHELTER_VIEWS):
-                cur.execute(stmt)
-                built += 1
+                name = "?"
+                m = re.search(r"CREATE OR REPLACE VIEW\s+(\S+)", stmt, re.I)
+                if m:
+                    name = m.group(1)
+                try:
+                    cur.execute(stmt)
+                    built += 1
+                except Exception as exc:  # noqa: BLE001
+                    msg = str(exc).splitlines()[-1][:120]
+                    if "does not exist" in msg:
+                        deferred.append((name, msg))
+                    else:
+                        raise
         ok(f"REF.V_AAC_* built ({built} views)")
+        for name, msg in deferred:
+            warn(f"deferred {name}: {msg}")
+            info("       re-run scripts/austin_sync.py after run_sql.py --all")
 
         header("Sanity check")
         for sql, label in [
