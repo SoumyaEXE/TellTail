@@ -163,14 +163,18 @@ AS
 -- suspended, and resuming the root first would fire a run against a DAG that
 -- is only half awake.
 -- ---------------------------------------------------------------------------
-ALTER TASK ORACLE.T_ATTEST   RESUME;
-ALTER TASK AI.T_AI           RESUME;
-ALTER TASK ML.T_DRIVERS      RESUME;
-ALTER TASK ML.T_ML           RESUME;
-ALTER TASK ML.T_SNAPSHOT     RESUME;
+ALTER TASK ORACLE.T_ATTEST    RESUME;
+ALTER TASK AI.T_BRIEF         RESUME;
+ALTER TASK AI.T_TRIAGE        RESUME;
+ALTER TASK AI.T_NOTES         RESUME;
+ALTER TASK ML.T_DRIVERS       RESUME;
+ALTER TASK ML.T_ANOMALY       RESUME;
+ALTER TASK ML.T_FORECAST      RESUME;
+ALTER TASK ML.T_BOUNDARY      RESUME;
+ALTER TASK ML.T_SNAPSHOT      RESUME;
 ALTER TASK MARTS.T_MATCH_ROWS RESUME;
-ALTER TASK MARTS.T_SYNDROMES RESUME;
-ALTER TASK MARTS.T_ROOT      RESUME;
+ALTER TASK MARTS.T_SYNDROMES  RESUME;
+ALTER TASK MARTS.T_ROOT       RESUME;
 
 -- ---------------------------------------------------------------------------
 -- Pipeline observability. Tab 9 reads these four views and nothing else.

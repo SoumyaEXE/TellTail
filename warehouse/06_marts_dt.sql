@@ -37,10 +37,15 @@ USE SCHEMA MARTS;
 
 -- Are SHAKE and SCRATCH real labels in this dataset, or must they be derived?
 -- Answered from data, at refresh time, not assumed at authoring time.
+-- COALESCE is not decoration. Over an empty REF.LABEL_MAP, BOOLOR_AGG returns
+-- NULL; `NOT NULL` is NULL; the heuristic CASE branches below never match; and
+-- SHAKE and SCRATCH are never assigned at all — so S1 silently cannot fire on a
+-- warehouse where Gate A output was not pushed. FALSE is the correct default:
+-- if we cannot see the labels, assume they are absent and derive.
 CREATE OR REPLACE VIEW MARTS.V_NECK_LABELS_PRESENT AS
 SELECT
-    BOOLOR_AGG(state = 'SHAKE')   AS has_shake,
-    BOOLOR_AGG(state = 'SCRATCH') AS has_scratch
+    COALESCE(BOOLOR_AGG(state = 'SHAKE'), FALSE)   AS has_shake,
+    COALESCE(BOOLOR_AGG(state = 'SCRATCH'), FALSE) AS has_scratch
 FROM REF.LABEL_MAP
 WHERE state IS NOT NULL;
 
