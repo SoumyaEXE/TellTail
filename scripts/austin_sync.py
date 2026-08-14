@@ -157,9 +157,15 @@ def main() -> int:
             ok(f"REF.AAC_OUTCOMES: {n:,} records")
 
         header("Building the shelter-reality views")
+        # One statement per execute(): the connector rejects a multi-statement
+        # string unless num_statements is set, and we already own a splitter that
+        # understands $$ blocks and embedded semicolons.
+        built = 0
         with conn.cursor() as cur:
-            cur.execute(SHELTER_VIEWS)
-        ok("REF.V_AAC_* built")
+            for stmt in split_statements(SHELTER_VIEWS):
+                cur.execute(stmt)
+                built += 1
+        ok(f"REF.V_AAC_* built ({built} views)")
 
         header("Sanity check")
         for sql, label in [
