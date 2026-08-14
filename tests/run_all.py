@@ -41,25 +41,49 @@ def check_sql() -> bool:
     os.environ.setdefault("SNOWFLAKE_WAREHOUSE", "TELLTAIL_WH")
     os.environ.setdefault("SNOWFLAKE_DATABASE", "TELLTAIL")
 
-    from _common import render_sql, split_statements  # noqa: E402
+    from _common import first_line, render_sql, split_statements  # noqa: E402
 
     ok = True
     for f in sorted((REPO / "warehouse").glob("[0-9][0-9]_*.sql")):
         try:
             stmts = split_statements(render_sql(f.read_text(encoding="utf-8"),
                                                 source=f.name))
-            unresolved = [s for s in stmts if "${" in s]
-            if unresolved:
-                print(f"  FAIL {f.name}: unresolved template variable")
-                ok = False
-                continue
-            print(f"  PASS {f.name:<28} {len(stmts):>3} statements")
         except SystemExit as exc:
             print(f"  FAIL {f.name}: {exc}")
             ok = False
+            continue
         except Exception as exc:  # noqa: BLE001
             print(f"  FAIL {f.name}: {type(exc).__name__}: {exc}")
             ok = False
+            continue
+
+        problems: list[str] = []
+
+        if any("${" in s for s in stmts):
+            problems.append("unresolved ${TEMPLATE} variable")
+
+        # A statement that begins with CALL, END or BEGIN is a FRAGMENT of a
+        # multi-statement `AS BEGIN ... END;` body that the splitter tore apart
+        # on an inner semicolon. Snowflake accepts such bodies; no client that
+        # splits on semicolons can. The failure is silent and expensive: the
+        # task gets created with only its first statement and quietly does a
+        # fraction of its job. Keep procedure bodies inside $$ ... $$ and give
+        # each task exactly one CALL.
+        for i, s in enumerate(stmts):
+            head = first_line(s, 40).upper()
+            if head.startswith(("CALL ", "END", "BEGIN")):
+                problems.append(
+                    f"statement {i} is a fragment of a BEGIN...END body: "
+                    f"{first_line(s, 60)!r}"
+                )
+
+        if problems:
+            print(f"  FAIL {f.name}")
+            for p in problems:
+                print(f"       {p}")
+            ok = False
+        else:
+            print(f"  PASS {f.name:<28} {len(stmts):>3} statements")
     return ok
 
 
