@@ -348,7 +348,15 @@ AS v(syndrome_code, variant, pattern_text, min_epochs, note);
 --    ~91% to ~70-74% when generalising to unseen dogs. Hold out whole dogs and
 --    report the honest number.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TABLE REF.HOLDOUT_DOGS (
+-- IF NOT EXISTS, deliberately. This file is the parameter seed, and retuning a
+-- threshold means re-running it. With CREATE OR REPLACE that emptied the
+-- holdout as a side effect, which does not fail anything loudly — ML.V_TEST
+-- simply goes empty and ML.V_TRAIN quietly widens to all 45 dogs, so the next
+-- reported accuracy is a row-split fiction wearing a dog-disjoint label. The
+-- one number the submission stakes its honesty on must not be destroyable by
+-- editing an unrelated threshold. SP_ASSIGN_HOLDOUT below rewrites it on
+-- purpose when the split is actually meant to change.
+CREATE TABLE IF NOT EXISTS REF.HOLDOUT_DOGS (
     dog_id   NUMBER,
     breed    STRING,
     reason   STRING
