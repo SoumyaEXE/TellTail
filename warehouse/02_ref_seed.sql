@@ -119,21 +119,21 @@ INSERT INTO REF.ETHOGRAM
     (state, display_name, family, derivation, is_neck_dominant,
      singleton_diagnostic, activity_class, colour_hex, sort_order, description)
 SELECT * FROM VALUES
- ('REST',    'Resting',      'posture',       'MODEL',     FALSE, TRUE,  'STATIONARY',      '#A8A29E',  1, 'Lying on chest. Low vector magnitude, stable pitch. Singleton onset in S1.'),
- ('SIT',     'Sitting',      'posture',       'MODEL',     FALSE, FALSE, 'STATIONARY',      '#D6D3D1',  2, 'Upright, stationary, pitch distinct from lying. Model-only; the rules fallback reads it as STAND.'),
- ('STAND',   'Standing',     'posture',       'MODEL',     FALSE, TRUE,  'STATIONARY',      '#E7E5E4',  3, 'Upright, stationary. Singleton alert stand in S5, singleton rise in S4.'),
- ('WALK',    'Walking',      'locomotion',    'MODEL',     FALSE, FALSE, 'SLOW_GAIT',       '#BFDBFE',  4, 'Both sensors in phase, low cadence.'),
- ('TROT',    'Trotting',     'locomotion',    'MODEL',     FALSE, FALSE, 'FAST_GAIT',       '#60A5FA',  5, 'Both sensors in phase, mid cadence.'),
- ('GALLOP',  'Galloping',    'locomotion',    'MODEL',     FALSE, FALSE, 'FAST_GAIT',       '#1D4ED8',  6, 'Both sensors in phase, high magnitude.'),
- ('SNIFF',   'Sniffing',     'posture',       'MODEL',     FALSE, FALSE, 'OTHER',           '#FDE68A',  7, 'Treat-searching. Head down, low translation.'),
- ('PLAY',    'Playing',      'locomotion',    'MODEL',     FALSE, FALSE, 'FAST_GAIT',       '#93C5FD',  8, 'High variance, irregular, both sensors active. Model-only.'),
- ('SHAKE',   'Head shake',   'neck_dominant', 'HEURISTIC', TRUE,  TRUE,  'NECK',            '#B45309',  9, 'Neck-dominant, high frequency, sensors decoupled. Singleton in S1 — never smoothed.'),
- ('SCRATCH', 'Scratching',   'neck_dominant', 'HEURISTIC', TRUE,  FALSE, 'NECK',            '#D97706', 10, 'Neck-dominant, sustained, sensors decoupled. Always quantified in patterns.'),
- ('PAUSE',   'Pause',        'derived',       'CONTEXT',   FALSE, TRUE,  'STATIONARY',      '#FCA5A5', 11, 'Still epoch bracketed by locomotion. Singleton stride interruption in S2.'),
- ('PACE',    'Pacing',       'derived',       'CONTEXT',   FALSE, FALSE, 'SLOW_GAIT',       '#F59E0B', 12, 'Locomotion with repeated yaw reversal. Back-and-forth.'),
- ('CIRCLE',  'Circling',     'derived',       'CONTEXT',   FALSE, FALSE, 'OTHER',           '#EA580C', 13, 'Sustained same-direction yaw, low forward translation.'),
- ('SLOW_TRANSITION','Slow rise','derived',    'CONTEXT',   FALSE, TRUE,  'OTHER',           '#C2410C', 14, 'Pitch variance rises while magnitude stays low. Singleton lever-up in S4.'),
- ('UNKNOWN', 'Unknown',      'derived',       'CONTEXT',   FALSE, TRUE,  'OTHER',           '#F5F5F4', 98, 'Epoch failed the sample-count quality gate. Never smoothed over.')
+ ('REST',    'Resting',      'posture',       'MODEL',     FALSE, TRUE,  'STATIONARY',      '#B5AFA8',  1, 'Lying on chest. Low vector magnitude, stable pitch. Singleton onset in S1.'),
+ ('SIT',     'Sitting',      'posture',       'MODEL',     FALSE, FALSE, 'STATIONARY',      '#968F86',  2, 'Upright, stationary, pitch distinct from lying. Model-only; the rules fallback reads it as STAND.'),
+ ('STAND',   'Standing',     'posture',       'MODEL',     FALSE, TRUE,  'STATIONARY',      '#78716C',  3, 'Upright, stationary. Singleton alert stand in S5, singleton rise in S4.'),
+ ('WALK',    'Walking',      'locomotion',    'MODEL',     FALSE, FALSE, 'SLOW_GAIT',       '#86B6EF',  4, 'Both sensors in phase, low cadence.'),
+ ('TROT',    'Trotting',     'locomotion',    'MODEL',     FALSE, FALSE, 'FAST_GAIT',       '#2A78D6',  5, 'Both sensors in phase, mid cadence.'),
+ ('GALLOP',  'Galloping',    'locomotion',    'MODEL',     FALSE, FALSE, 'FAST_GAIT',       '#184F95',  6, 'Both sensors in phase, high magnitude.'),
+ ('SNIFF',   'Sniffing',     'posture',       'MODEL',     FALSE, FALSE, 'OTHER',           '#57534E',  7, 'Treat-searching. Head down, low translation.'),
+ ('PLAY',    'Playing',      'locomotion',    'MODEL',     FALSE, FALSE, 'FAST_GAIT',       '#5598E7',  8, 'High variance, irregular, both sensors active. Model-only.'),
+ ('SHAKE',   'Head shake',   'neck_dominant', 'HEURISTIC', TRUE,  TRUE,  'NECK',            '#EB6834',  9, 'Neck-dominant, high frequency, sensors decoupled. Singleton in S1 — never smoothed.'),
+ ('SCRATCH', 'Scratching',   'neck_dominant', 'HEURISTIC', TRUE,  FALSE, 'NECK',            '#F59E5C', 10, 'Neck-dominant, sustained, sensors decoupled. Always quantified in patterns.'),
+ ('PAUSE',   'Pause',        'derived',       'CONTEXT',   FALSE, TRUE,  'STATIONARY',      '#B7AEE0', 11, 'Still epoch bracketed by locomotion. Singleton stride interruption in S2.'),
+ ('PACE',    'Pacing',       'derived',       'CONTEXT',   FALSE, FALSE, 'SLOW_GAIT',       '#8B7FD0', 12, 'Locomotion with repeated yaw reversal. Back-and-forth.'),
+ ('CIRCLE',  'Circling',     'derived',       'CONTEXT',   FALSE, FALSE, 'OTHER',           '#6B5CC4', 13, 'Sustained same-direction yaw, low forward translation.'),
+ ('SLOW_TRANSITION','Slow rise','derived',    'CONTEXT',   FALSE, TRUE,  'OTHER',           '#4A3AA7', 14, 'Pitch variance rises while magnitude stays low. Singleton lever-up in S4.'),
+ ('UNKNOWN', 'Unknown',      'derived',       'CONTEXT',   FALSE, TRUE,  'OTHER',           '#E7E5E4', 98, 'Epoch failed the sample-count quality gate. Never smoothed over.')
 AS v(state, display_name, family, derivation, is_neck_dominant, singleton_diagnostic,
      activity_class, colour_hex, sort_order, description);
 

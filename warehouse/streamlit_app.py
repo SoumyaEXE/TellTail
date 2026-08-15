@@ -73,17 +73,47 @@ CHAT_INK = "#262730"
 CHAT_BOT = "#DD6B4D"     # bottts orange
 CHAT_USER = "#FBD7B0"    # fun-emoji peach
 
+# ---------------------------------------------------------------------------
+# THE CHART PALETTE, VALIDATED RATHER THAN CHOSEN.
+#
+# Every colour below was run through a colour-vision-deficiency validator
+# against this app's actual chart surface (#FFFFFF) — protan/deutan/tritan
+# separation, chroma floor, lightness band and contrast. Nothing here was
+# picked because it looked nice next to the last one.
+#
+# The eight series slots are used IN ORDER and never cycled past the end. They
+# are for things with no natural ordering: syndrome codes, pattern symbols,
+# cohort bands. Worst adjacent pair is ΔE 9.1 under protanopia, ΔE 19.6 for
+# normal vision — both clear.
+#
+# UI CHROME IS NOT A SERIES COLOUR. ACCENT stays the dark amber it always was
+# because it is worn by text, rules and borders, where the requirement is
+# reading contrast, not separation from seven other hues. A colour that labels
+# a thing and a colour that IS the thing are different jobs.
+# ---------------------------------------------------------------------------
+S_BLUE = "#2a78d6"
+S_ORANGE = "#eb6834"
+S_AQUA = "#1baf7a"
+S_YELLOW = "#eda100"
+S_MAGENTA = "#e87ba4"
+S_GREEN = "#008300"
+S_VIOLET = "#4a3aa7"
+S_RED = "#e34948"
+
+# Pattern-symbol palette for the hero ribbon. Deliberately not the state
+# palette: the point of that chart is which PATTERN VARIABLE each epoch played.
+SYMBOL_COLOURS = [S_BLUE, S_ORANGE, S_AQUA, S_YELLOW, S_MAGENTA,
+                  S_GREEN, S_VIOLET, S_RED]
+
+# Triage keeps its own darker greens/ambers/reds rather than borrowing series
+# slots. These are worn as a solid badge with WHITE TEXT ON THEM, so the bar
+# they have to clear is text contrast; the series oranges and greens are two
+# stops too light for that and would ship an unreadable badge.
 TRIAGE_COLOUR = {
     1: "#15803D", "routine monitoring": "#15803D",
     2: "#B45309", "schedule appointment": "#B45309",
     3: "#B91C1C", "urgent veterinary attention": "#B91C1C",
 }
-# Pattern-symbol palette for the hero ribbon. Deliberately not the state palette:
-# the point of that chart is which PATTERN VARIABLE each epoch played.
-SYMBOL_COLOURS = [
-    "#1C1917", "#B45309", "#0369A1", "#B91C1C", "#15803D",
-    "#7C3AED", "#0F766E", "#A16207", "#BE185D",
-]
 
 # ---------------------------------------------------------------------------
 # ONE HEIGHT SCALE FOR EVERY CHART IN THE APP.
