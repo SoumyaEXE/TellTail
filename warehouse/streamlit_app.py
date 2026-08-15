@@ -108,7 +108,7 @@ st.markdown(f"""
       border-right: 1px solid {BORDER}; }}
   section[data-testid="stSidebar"] .stRadio > div {{ gap: 1px; }}
   section[data-testid="stSidebar"] label {{ font-size: 13.5px; }}
-  .tt-railnote {{ margin-top: 14px; padding: 8px 10px; background: {BG};
+  .tt-railnote {{ margin-top: 14px; padding: 8px 10px; background: {SURFACE};
       border-radius: 0 4px 4px 0; font-size: 12px; line-height: 1.4; }}
   .tt-pagehead {{ padding: 2px 0 2px 12px; margin: 0 0 12px; }}
   .tt-pagetitle {{ font-size: 21px; font-weight: 700; letter-spacing: -.015em;

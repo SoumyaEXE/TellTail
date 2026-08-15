@@ -62,6 +62,24 @@ def main() -> int:
                 f"Remove it. SiS has no `python` package to resolve, so the "
                 f"app will load to 'Packages not found' instead of rendering.")
 
+    # Gate the deploy on the SiS compatibility suite.
+    #
+    # Both failures that reached a running app were things a parse could not
+    # catch: a `python=` pin in environment.yml, and an f-string interpolating
+    # {BG} when the constant is SURFACE. The second one parses perfectly and
+    # dies at import with NameError. Deploying is the expensive way to find
+    # that out, so check here rather than in Snowsight.
+    import subprocess
+    repo = Path(__file__).resolve().parent.parent
+    probe = subprocess.run(
+        [sys.executable, str(repo / "tests" / "sis_compat.py"), str(app)],
+        capture_output=True, text=True)
+    for line in (probe.stdout + probe.stderr).splitlines():
+        print("  " + line)
+    if probe.returncode != 0:
+        die("tests/sis_compat.py rejected the app. Fix it before deploying — "
+            "these failures do not surface until the app loads in Snowsight.")
+
     db = env("SNOWFLAKE_DATABASE", "TELLTAIL")
     wh = env("SNOWFLAKE_WAREHOUSE", "TELLTAIL_WH")
     conn = connect()
