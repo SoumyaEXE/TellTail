@@ -3,7 +3,7 @@
 secrets/
 *.pem
 devnet.json
-
+/docs
 # --- data (10.6M rows; never committed) ---
 data/
 !data/.gitkeep
