@@ -342,6 +342,56 @@ def sensor_anatomy_svg(neck_hz=100, back_hz=100) -> str:
 </svg>'''
 
 
+def symbol_ribbon(code, dog_id, test_num, match_id, *, height=96):
+    """The matched epochs, each coloured by the pattern variable it played.
+
+    ALL ROWS PER MATCH + CLASSIFIER() is what makes this drawable at all: the
+    engine reports which symbol consumed each row, so "onset shake itch itch
+    itch shake itch itch" is a picture of real seconds rather than a caption.
+    Shared by the Syndromes tab and the Vet Note tab, because a note that
+    asserts a sequence should be printed beside it.
+    """
+    mrows = rows(f"""
+        SELECT epoch_ts, state, symbol, seq_in_match
+        FROM MARTS.SYNDROME_MATCH_ROWS
+        WHERE syndrome_code = '{code}' AND dog_id = {dog_id}
+          AND test_num = {test_num} AND match_id = {match_id}
+        ORDER BY seq_in_match
+    """)
+    if not mrows:
+        empty_state("No per-epoch symbols for this match.",
+                    "CALL MARTS.SP_BUILD_MATCH_ROWS() populates them "
+                    "(ALL ROWS PER MATCH + CLASSIFIER()).")
+        return
+    syms = list(dict.fromkeys(col(mrows, "SYMBOL")))
+    cmap = {s: SYMBOL_COLOURS[i % len(SYMBOL_COLOURS)] for i, s in enumerate(syms)}
+    st.markdown(
+        "<div class='tt-mono' style='font-size:15px;letter-spacing:.02em;"
+        "margin-bottom:6px'>" +
+        " ".join(f"<span style='color:{cmap[r['SYMBOL']]};font-weight:600'>"
+                 f"{r['SYMBOL']}</span>" for r in mrows) + "</div>",
+        unsafe_allow_html=True)
+    if PLOTLY:
+        fig = go.Figure()
+        for r in mrows:
+            fig.add_trace(go.Bar(
+                x=[1], y=["match"], orientation="h",
+                marker=dict(color=cmap[r["SYMBOL"]], line=dict(width=0)),
+                text=[f'{r["SYMBOL"]} — state {r["STATE"]}<br>{r["EPOCH_TS"]}'],
+                hoverinfo="text", showlegend=False))
+        fig.update_layout(
+            barmode="stack",
+            title="every matched epoch, coloured by the pattern variable it played",
+            title_font_size=11,
+            xaxis=dict(visible=False), yaxis=dict(visible=False))
+        chart(clean_axes(fig), height)
+    st.markdown(" ".join(
+        f'<span class="tt-chip" style="background:{cmap[s]}22;'
+        f'border-color:{cmap[s]}"><b>{s}</b> = '
+        f'{[r["STATE"] for r in mrows if r["SYMBOL"] == s][0]}</span>'
+        for s in syms), unsafe_allow_html=True)
+
+
 def empty_state(what: str, fix: str) -> None:
     st.markdown(
         f'<div class="tt-card"><b>{what}</b><br>'
@@ -979,52 +1029,8 @@ def _page_3():
         cl, cr = st.columns([3, 2])
 
         with cl:
-            mrows = rows(f"""
-                SELECT epoch_ts, state, symbol, seq_in_match
-                FROM MARTS.SYNDROME_MATCH_ROWS
-                WHERE syndrome_code = '{f["SYNDROME_CODE"]}'
-                  AND dog_id = {f["DOG_ID"]}
-                  AND test_num = {f["TEST_NUM"]}
-                  AND match_id = {f["MATCH_ID"]}
-                ORDER BY seq_in_match
-            """)
-            if mrows:
-                syms = list(dict.fromkeys(col(mrows, "SYMBOL")))
-                cmap = {s: SYMBOL_COLOURS[i % len(SYMBOL_COLOURS)]
-                        for i, s in enumerate(syms)}
-
-                st.markdown(
-                    "<div class='tt-mono' style='font-size:15px;letter-spacing:.02em;"
-                    "margin-bottom:6px'>" +
-                    " ".join(
-                        f"<span style='color:{cmap[r['SYMBOL']]};font-weight:600'>"
-                        f"{r['SYMBOL']}</span>" for r in mrows) +
-                    "</div>", unsafe_allow_html=True)
-
-                if PLOTLY:
-                    fig = go.Figure()
-                    for r in mrows:
-                        fig.add_trace(go.Bar(
-                            x=[1], y=["match"], orientation="h",
-                            marker=dict(color=cmap[r["SYMBOL"]], line=dict(width=0)),
-                            text=[f'{r["SYMBOL"]} — state {r["STATE"]}<br>{r["EPOCH_TS"]}'],
-                            hoverinfo="text", showlegend=False))
-                    fig.update_layout(
-                        barmode="stack",
-                        title="every matched epoch, coloured by the pattern variable it played",
-                        title_font_size=11,
-                        xaxis=dict(visible=False), yaxis=dict(visible=False))
-                    chart(clean_axes(fig), 96)
-
-                st.markdown(" ".join(
-                    f'<span class="tt-chip" style="background:{cmap[s]}22;'
-                    f'border-color:{cmap[s]}"><b>{s}</b> = '
-                    f'{[r["STATE"] for r in mrows if r["SYMBOL"] == s][0]}</span>'
-                    for s in syms), unsafe_allow_html=True)
-            else:
-                empty_state("No per-epoch symbols for this match.",
-                            "CALL MARTS.SP_BUILD_MATCH_ROWS() populates them "
-                            "(ALL ROWS PER MATCH + CLASSIFIER()).")
+            symbol_ribbon(f["SYNDROME_CODE"], f["DOG_ID"], f["TEST_NUM"],
+                          f["MATCH_ID"])
 
             ev = f.get("EVIDENCE")
             if ev:
@@ -1296,6 +1302,29 @@ def _page_5():
             f'<div class="tt-card" style="font-size:13.5px;line-height:1.65;'
             f'white-space:pre-wrap">{n["SOAP_NOTE"]}</div>',
             unsafe_allow_html=True)
+
+        # The sequence the note is about, printed beside the note.
+        #
+        # A generated paragraph asserting "repeated gait interruption" is worth
+        # exactly as much as the reader's willingness to believe it. This is the
+        # actual matched seconds, each coloured by the pattern variable it
+        # played, so the prose can be checked against the rows it came from.
+        # AI.V_VET_NOTE_FULL does not carry test_num or match_id, so the match
+        # is resolved by its onset — the key the note itself displays.
+        st.markdown("**The sequence this note is describing**")
+        key = rows(f"""
+            SELECT test_num, match_id FROM MARTS.SYNDROME_MATCHES
+            WHERE dog_id = {n['DOG_ID']}
+              AND syndrome_code = '{n['SYNDROME_CODE']}'
+              AND onset_ts = '{str(n['ONSET_TS'])[:19]}'
+            LIMIT 1
+        """)
+        if key:
+            symbol_ribbon(n["SYNDROME_CODE"], n["DOG_ID"],
+                          key[0]["TEST_NUM"], key[0]["MATCH_ID"], height=84)
+        else:
+            empty_state("Could not resolve this note back to its match.",
+                        "The note is kept; only the per-epoch ribbon is missing.")
 
         c1, c2 = st.columns(2)
         with c1:
