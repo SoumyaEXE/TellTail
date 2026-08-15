@@ -14,7 +14,10 @@
       "Bash(python \"C:/Users/Soumya/AppData/Local/Temp/claude/c--Users-Soumya-Desktop-telltail/98191729-086b-4139-80d8-bcfbe383ae82/scratchpad/hyp.py\")",
       "Bash(python scripts/run_sql.py --from 08)",
       "Bash(python scripts/run_sql.py --only 11)",
-      "Bash(python scripts/austin_sync.py)"
+      "Bash(python scripts/austin_sync.py)",
+      "Bash(python scripts/austin_sync.py --views-only)",
+      "Bash(python scripts/austin_sync.py --skip-intakes --skip-outcomes)",
+      "Bash(python tests/sis_compat.py)"
     ]
   }
 }

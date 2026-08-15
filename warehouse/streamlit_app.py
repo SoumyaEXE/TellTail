@@ -1090,28 +1090,45 @@ with TABS[6]:
     c1, c2 = st.columns(2)
 
     with c1:
-        st.markdown("**Feature importance**")
-        fi = rows("SELECT * FROM ML.FEATURE_IMPORTANCE ORDER BY 2 DESC LIMIT 25")
+        st.markdown("**Feature separation**")
+        # ML.V_FEATURE_SEPARATION, not the model's SHOW_FEATURE_IMPORTANCE.
+        # Every introspection accessor on this account raises "Computation
+        # Error in function __SHOW_*" while PREDICT works fine, so the
+        # importance table is permanently empty here. The caption below says
+        # exactly what this is instead of passing it off as the model's.
+        st.markdown('<span class="tt-quiet">One-way ANOVA F-ratio per feature '
+                    'over the labelled epochs: between-class variance of the '
+                    'class means over pooled within-class variance. How well '
+                    'each feature separates the ethogram states ON ITS OWN — '
+                    'a different question from the split gain a tree model '
+                    'reports, and computed here because model introspection '
+                    'does not run on this account.</span>',
+                    unsafe_allow_html=True)
+        fi = rows("""SELECT feature, f_ratio FROM ML.V_FEATURE_SEPARATION
+                     WHERE f_ratio IS NOT NULL ORDER BY f_ratio DESC LIMIT 25""")
         if PLOTLY and fi:
-            keys = list(fi[0].keys())
-            name_k = next((k for k in keys if "FEATURE" in k or "NAME" in k), keys[0])
-            score_k = next((k for k in keys if "IMPORT" in k or "SCORE" in k or
-                            "VALUE" in k), keys[-1])
-            names = [str(r[name_k]) for r in fi][::-1]
-            vals = [float(r[score_k] or 0) for r in fi][::-1]
+            names = [str(r["FEATURE"]) for r in fi][::-1]
+            vals = [float(r["F_RATIO"] or 0) for r in fi][::-1]
             fig = go.Figure(go.Bar(
                 x=vals, y=names, orientation="h",
                 marker=dict(color=[ACCENT if "CORR" in n.upper() else "#D6D3D1"
                                    for n in names]),
-                text=[f"{n} {v:.4f}" for n, v in zip(names, vals)], hoverinfo="text"))
-            fig.update_layout(title="what the classifier leans on "
+                text=[f"{n} {v:.2f}" for n, v in zip(names, vals)], hoverinfo="text"))
+            fig.update_layout(title="how well each feature separates the states "
                                     "(neck/back correlation in amber)",
                               title_font_size=11)
             chart(clean_axes(fig, y_zero_line=False), max(280, 14 * len(names)))
         else:
-            empty_state("No feature importance.",
-                        "Available only on the ML.CLASSIFICATION path; the rules "
-                        "fallback has no learned importances.")
+            empty_state("No feature separation yet.",
+                        "Needs labelled epochs: run the bulk load and push the "
+                        "Gate A label map.")
+
+        acc_err = rows("SELECT classifier, accessors_ok, accessor_error "
+                       "FROM ML.MODEL_STATUS")
+        if acc_err and acc_err[0].get("ACCESSORS_OK") is False and                 acc_err[0].get("ACCESSOR_ERROR"):
+            st.caption(f"Model introspection unavailable on this account — "
+                       f"{acc_err[0]['CLASSIFIER']} trained and predicts "
+                       f"normally. Verbatim: {acc_err[0]['ACCESSOR_ERROR'][:180]}")
 
         st.markdown("**The feature, justifying itself**")
         st.markdown('<span class="tt-quiet">Neck/back correlation by true label. '

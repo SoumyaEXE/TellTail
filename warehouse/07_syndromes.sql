@@ -530,7 +530,12 @@ BEGIN
                    epoch_ts, state, symbol,
                    ROW_NUMBER() OVER (PARTITION BY dog_id, test_num, match_id
                                       ORDER BY epoch_ts)
-            FROM (SELECT dog_id, test_num, epoch_ts, state FROM MARTS.V_SYNDROME_INPUT)
+            -- activity_class comes along because the DEFINE text is taken
+            -- verbatim from the catalogue and S3 matches on it. Projecting
+            -- only `state` here fails that one pattern with "invalid
+            -- identifier ACTIVITY_CLASS" while the other five run.
+            FROM (SELECT dog_id, test_num, epoch_ts, state, activity_class
+                  FROM MARTS.V_SYNDROME_INPUT)
             MATCH_RECOGNIZE (
                 PARTITION BY dog_id, test_num
                 ORDER BY epoch_ts
@@ -622,7 +627,12 @@ BEGIN
                    dog_id, test_num, match_id, onset_ts, resolve_ts, n_epochs,
                    DATEDIFF(''second'', onset_ts, resolve_ts),
                    ' || r.min_epochs || '
-            FROM (SELECT dog_id, test_num, epoch_ts, state FROM MARTS.V_SYNDROME_INPUT)
+            -- activity_class comes along because the DEFINE text is taken
+            -- verbatim from the catalogue and S3 matches on it. Projecting
+            -- only `state` here fails that one pattern with "invalid
+            -- identifier ACTIVITY_CLASS" while the other five run.
+            FROM (SELECT dog_id, test_num, epoch_ts, state, activity_class
+                  FROM MARTS.V_SYNDROME_INPUT)
             MATCH_RECOGNIZE (
                 PARTITION BY dog_id, test_num
                 ORDER BY epoch_ts

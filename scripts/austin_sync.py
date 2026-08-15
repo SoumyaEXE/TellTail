@@ -194,7 +194,16 @@ def main() -> int:
         for sql, label in [
             ("SELECT COUNT(*) AS n FROM REF.AAC_INTAKES", "intake records"),
             ("SELECT COUNT(*) AS n FROM REF.AAC_OUTCOMES", "outcome records"),
-            ("SELECT COUNT(*) AS n FROM REF.V_AAC_BEHAVIOUR_OUTCOMES", "behaviour-linked outcomes"),
+            # SUM(n), not COUNT(*): the view is a GROUPed summary, so COUNT(*)
+            # reports how many (outcome_type, subtype) pairs exist — it read
+            # "2" against 50,000 records and looked like a broken join.
+            ("SELECT COALESCE(SUM(n), 0) AS n FROM REF.V_AAC_BEHAVIOUR_OUTCOMES",
+             "behaviour-linked outcomes"),
+            ("""SELECT COUNT(*) AS n FROM REF.AAC_INTAKES i
+                JOIN REF.AAC_BEHAVIOUR_MAP m
+                  ON m.field = 'intake_condition' AND m.value = i.intake_condition
+                WHERE m.maps_to_syndrome IS NOT NULL""",
+             "syndrome-linked intakes"),
         ]:
             try:
                 print(f"  {label:<28} {int(q(conn, sql)[0]['N']):>10,}")
@@ -302,9 +311,28 @@ LEFT JOIN (
     FROM MARTS.SYNDROME_MATCHES GROUP BY 1
 ) tt ON tt.syndrome_code = c.syndrome_code
 LEFT JOIN (
+    -- Both ends of the shelter record, not just the outcome.
+    --
+    -- Counting only V_AAC_BEHAVIOUR_OUTCOMES left four of six syndromes
+    -- showing zero shelter records, because that view covers outcome_subtype
+    -- only and the sole behavioural subtypes Austin records are 'Behavior' and
+    -- 'Aggressive' — both mapped to S5. The intake side of REF.AAC_BEHAVIOUR_MAP
+    -- was already carrying Injured -> S2, Sick -> S6 and Aged -> S4 and was
+    -- simply never read, so the comparison silently understated itself by
+    -- thousands of animals.
     SELECT maps_to_syndrome, SUM(n) AS shelter_records
-    FROM REF.V_AAC_BEHAVIOUR_OUTCOMES
-    WHERE maps_to_syndrome IS NOT NULL
+    FROM (
+        SELECT m.maps_to_syndrome, COUNT(*) AS n
+        FROM REF.AAC_INTAKES i
+        JOIN REF.AAC_BEHAVIOUR_MAP m
+             ON m.field = 'intake_condition' AND m.value = i.intake_condition
+        WHERE m.maps_to_syndrome IS NOT NULL
+        GROUP BY 1
+        UNION ALL
+        SELECT maps_to_syndrome, n
+        FROM REF.V_AAC_BEHAVIOUR_OUTCOMES
+        WHERE maps_to_syndrome IS NOT NULL
+    )
     GROUP BY 1
 ) sh ON sh.maps_to_syndrome = c.syndrome_code
 LEFT JOIN (
