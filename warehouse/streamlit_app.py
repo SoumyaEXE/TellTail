@@ -14,7 +14,9 @@ without reading a word of the post:
   8 Shelter Reality why it matters
   9 Pipeline        how it was built
 
-FOUR SiS-ONLY HAZARDS, ALL HANDLED HERE. Every one of them reproduces nowhere
+Plus a tenth page, Ask TELLTAIL, which is Cortex answering only from rows.
+
+SIX SiS-ONLY HAZARDS, ALL HANDLED HERE. Every one of them reproduces nowhere
 else, which is what makes them expensive:
 
   1. Snowpark to_pandas() returns numerics as object-dtype Decimal. Plotly then
@@ -28,6 +30,15 @@ else, which is what makes them expensive:
   4. Old plotly drops traces whose customdata is a mixed-type numpy array, and
      the axes scale while zero points render. Hover strings are prebuilt and
      passed as text= with hoverinfo="text".
+  5. There is no outbound network, so a photograph can only be shown if its
+     bytes are already in the account. Breed photos are base64 in
+     REF.BREED_IMAGE, written by scripts/fetch_breed_images.py; everything
+     else on screen is inline SVG. They are photographs OF THE BREED and the
+     page says so everywhere one appears.
+  6. Custom bidirectional components cannot be installed — there is no way to
+     serve a component's frontend bundle from the sandbox. The chat on the
+     last page is AI-Yash/st-chat's design ported to plain HTML and CSS, with
+     locally drawn avatars in place of its DiceBear URLs.
 
 AND ONE ARCHITECTURAL RULE: this app reads TABLES. It never calls a Cortex AI
 function, because a render path that costs credits is a render path that will
@@ -88,10 +99,13 @@ st.markdown(f"""
      Breed names run from "Beauceron" to "Nova Scotia Duck Tolling Retriever";
      left to themselves they wrap onto a second line, shove the triage badge
      down, and every card in that row ends up a different height. */
-  .tt-dogcard {{ display:flex; flex-direction:column; min-height: 168px;
+  .tt-dogcard {{ display:flex; flex-direction:column; min-height: 180px;
       margin-bottom: 8px; padding: 11px 13px; }}
   .tt-dogcard-head {{ display:flex; justify-content:space-between;
       align-items:flex-start; gap:8px; }}
+  /* photo + name as one unit, so the triage badge stays hard right and the
+     thumbnail never pushes the breed onto a second line */
+  .tt-dogcard-id {{ display:flex; align-items:center; gap:9px; min-width:0; }}
   .tt-dogcard-name {{ min-width:0; }}
   .tt-dogcard-name b {{ font-size:15px; white-space:nowrap; }}
   /* clip rather than wrap: the badge must stay on the first line */
@@ -103,20 +117,52 @@ st.markdown(f"""
      is what makes the bottom edges line up across a row */
   .tt-spark {{ margin-top:auto; padding-top:8px; }}
   .tt-dogcard-foot {{ margin-top:4px; }}
-  /* left rail + page header */
+  /* ------------------------------------------------------------------
+     LEFT RAIL. The nav is an st.radio because the router needs its value,
+     but a bare radio list reads as a form control rather than navigation.
+     These rules turn each option into a nav row — full-width hit area,
+     hover, and a hue bar on the selected one — without touching the widget
+     itself. Every selector degrades to a plain radio if SiS ships a build
+     whose DOM does not match, which is why none of them hide anything.
+     ------------------------------------------------------------------ */
   section[data-testid="stSidebar"] {{ background: {CARD};
       border-right: 1px solid {BORDER}; }}
   section[data-testid="stSidebar"] .stRadio > div {{ gap: 1px; }}
   section[data-testid="stSidebar"] label {{ font-size: 13.5px; }}
-  .tt-railstat {{ margin-top: 16px; border-top: 1px solid {BORDER};
+  section[data-testid="stSidebar"] div[role="radiogroup"] {{ gap: 1px; }}
+  section[data-testid="stSidebar"] div[role="radiogroup"] > label {{
+      display: flex; align-items: center; width: 100%;
+      padding: 5px 8px 5px 7px; margin: 0; border-radius: 5px;
+      border-left: 2px solid transparent; cursor: pointer; }}
+  section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {{
+      background: {SURFACE}; }}
+  section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {{
+      background: {SURFACE}; font-weight: 600; }}
+  .tt-brand {{ display:flex; align-items:center; gap:9px; margin-bottom:12px; }}
+  .tt-brand-mark {{ width:34px; height:34px; border-radius:8px; flex:0 0 auto;
+      background:{INK}; display:flex; align-items:center; justify-content:center; }}
+  .tt-railstat {{ margin-top: 14px; border-top: 1px solid {BORDER};
       padding-top: 10px; font-size: 12px; }}
   .tt-railstat > div {{ display:flex; justify-content:space-between;
       align-items:baseline; padding: 3px 0; gap: 8px; }}
   .tt-railstat span {{ color: {INK_2}; }}
   .tt-railstat b {{ color: {INK}; font-size: 13px; font-variant-numeric: tabular-nums; }}
+  /* a labelled number with the proportion it represents drawn underneath it,
+     so "38 of 45" is a length as well as a ratio */
+  .tt-meter {{ margin: 7px 0 0; }}
+  .tt-meter-top {{ display:flex; justify-content:space-between;
+      align-items:baseline; gap:8px; font-size:12px; }}
+  .tt-meter-top span {{ color:{INK_2}; }}
+  .tt-meter-top b {{ color:{INK}; font-size:12.5px; font-variant-numeric:tabular-nums; }}
+  .tt-meter-track {{ height:3px; border-radius:2px; background:{GRID};
+      margin-top:4px; overflow:hidden; }}
+  .tt-meter-fill {{ height:100%; border-radius:2px; }}
+  .tt-pill {{ display:inline-flex; align-items:center; gap:5px; font-size:11px;
+      padding:3px 8px; border-radius:11px; border:1px solid {BORDER};
+      background:{SURFACE}; color:{INK_2}; }}
   .tt-railfoot {{ margin-top: 10px; font-size: 11px; color: {INK_2};
       line-height: 1.45; }}
-  .tt-railnote {{ margin-top: 14px; padding: 8px 10px; background: {SURFACE};
+  .tt-railnote {{ margin-top: 12px; padding: 8px 10px; background: {SURFACE};
       border-radius: 0 4px 4px 0; font-size: 12px; line-height: 1.4; }}
   .tt-pagehead {{ padding: 2px 0 2px 12px; margin: 0 0 12px; }}
   .tt-pagetitle {{ font-size: 21px; font-weight: 700; letter-spacing: -.015em;
@@ -135,6 +181,44 @@ st.markdown(f"""
       padding: 8px 12px; font-size: 12px; color: #78350F; margin: 8px 0; }}
   .tt-quiet {{ color: {INK_2}; font-size: 12px; }}
   div[data-testid="stMetricValue"] {{ font-variant-numeric: tabular-nums; }}
+  /* ------------------------------------------------------------------
+     CHAT BUBBLES — ported from AI-Yash/st-chat (streamlit_chat/frontend/
+     src/stChat.css): .chat flex row, .chat.user row-reverse, a 50% round
+     avatar, and a .msg::after triangle made of transparent borders.
+
+     PORTED RATHER THAN INSTALLED, for two reasons that are both hard rules
+     here. Streamlit in Snowflake cannot load a custom bidirectional
+     component — there is no way to serve the package's compiled frontend
+     bundle from inside the sandbox. And st-chat draws its avatars from
+     DiceBear over HTTPS, which is exactly the outbound request SiS blocks,
+     so the stock component would render two broken images per turn. The
+     avatars below are inline SVG for the same reason the breed photos are
+     base64.
+
+     One deliberate change: st-chat anchors the tail to the row at top:0
+     with border-top-color, which works because every message is its own
+     iframe. In one page that puts a stray notch above each bubble, so the
+     tail is anchored to the bubble and points sideways.
+     ------------------------------------------------------------------ */
+  .tt-chat {{ display:flex; flex-direction:row; align-items:flex-start;
+      width:100%; margin:0 0 9px; }}
+  .tt-chat.user {{ flex-direction: row-reverse; }}
+  .tt-chat .avatar {{ display:flex; align-items:center; justify-content:center;
+      height:2.5rem; width:2.5rem; flex:0 0 auto; margin:3px; overflow:hidden;
+      border-radius:50%; border:1px solid {BORDER}; background:{SURFACE}; }}
+  .tt-chat .msg {{ display:inline-block; position:relative; margin:0 7px;
+      padding:10px 13px; max-width:74%; min-height:1.5rem; line-height:1.55;
+      font-size:13.5px; white-space:pre-line; border-radius:10px;
+      background:{CARD}; border:1px solid {BORDER}; color:{INK}; }}
+  .tt-chat .msg::after {{ content:""; position:absolute; top:13px;
+      display:block; border:0.5em solid transparent;
+      left:-1em; border-right-color:{BORDER}; }}
+  .tt-chat.user .msg {{ background:{SURFACE}; }}
+  .tt-chat.user .msg::after {{ left:auto; right:-1em;
+      border-right-color:transparent; border-left-color:{BORDER}; }}
+  .tt-chat .msg p {{ margin-block: 0; }}
+  .tt-chat-meta {{ font-size:10.5px; color:{INK_2}; margin:-4px 0 12px 3.4rem; }}
+  .tt-chat.user + .tt-chat-meta {{ text-align:right; margin:-4px 3.4rem 12px 0; }}
   table.tt {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
   table.tt th {{ text-align: left; border-bottom: 1px solid {BORDER}; padding: 5px 8px;
       color: {INK_2}; font-weight: 600; text-transform: uppercase; font-size: 10px;
@@ -185,6 +269,22 @@ def rows_live(sql: str) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         st.session_state.setdefault("_errors", []).append((sql[:120], str(exc)))
         raise
+    return [{k: _scrub(v) for k, v in r.as_dict().items()} for r in res]
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def rows_quiet(sql: str) -> list[dict]:
+    """rows() for OPTIONAL sources, swallowing the error instead of logging it.
+
+    REF.BREED_IMAGE is populated by scripts/fetch_breed_images.py, which needs a
+    Kaggle token. On an account where that has never run the table simply does
+    not exist, and that is a fact about the account rather than a bug — listing
+    it in the query-error expander would train the reader to ignore that panel.
+    """
+    try:
+        res = _session().sql(sql).collect()
+    except Exception:  # noqa: BLE001
+        return []
     return [{k: _scrub(v) for k, v in r.as_dict().items()} for r in res]
 
 
@@ -256,14 +356,18 @@ def sparkline_svg(series, width=260, height=34, colour=None) -> str:
 
 
 # --------------------------------------------------------------------------
-# The dog, drawn rather than photographed.
+# The dog, drawn rather than fetched.
 #
 # Streamlit in Snowflake has no outbound internet, so every <img src="http...">
-# renders as a broken icon — no breed photos, no CDN illustrations, no matter
-# how much nicer they would look. Inline SVG is the only picture that survives
-# the sandbox, and it is the more useful picture anyway: what a viewer needs is
-# not what a Beauceron looks like, it is WHERE THE TWO SENSORS SIT, because the
-# whole detection argument rests on the relationship between them.
+# renders as a broken icon — no CDN illustrations, no remote breed photos, no
+# matter how much nicer they would look. Only two kinds of picture survive the
+# sandbox: one drawn inline as SVG, and one whose bytes are ALREADY IN THE
+# ACCOUNT (see breed_photo below, reading base64 out of REF.BREED_IMAGE).
+#
+# The diagrams below stay drawn even now that the photographs exist, because
+# they are the more useful picture: what a viewer needs from this tab is not
+# what a Beauceron looks like, it is WHERE THE TWO SENSORS SIT, since the whole
+# detection argument rests on the relationship between them.
 # --------------------------------------------------------------------------
 
 # One silhouette per posture, so a state reads as a shape before it reads as a
@@ -297,6 +401,57 @@ def dog_glyph(state: str, size: int = 42, colour: str = None) -> str:
         f'<circle cx="66" cy="24" r="7" fill="none" stroke="{col}" stroke-width="3.4"/>'
         f'</svg>'
     )
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def breed_photos() -> dict:
+    """Reference breed photographs, as base64 already inside the account.
+
+    SiS has no outbound network, so <img src="https://..."> is a broken icon
+    whatever the host. scripts/fetch_breed_images.py range-reads the Stanford
+    Dogs archive, downsizes to a square thumbnail and stores the bytes in
+    REF.BREED_IMAGE, which is the only form of photograph that survives the
+    sandbox. Empty dict when that script has never run — every caller falls
+    back to the drawn silhouette rather than showing a gap.
+    """
+    data = rows_quiet("""
+        SELECT breed, image_b64, is_approximate, credit, source_folder
+        FROM REF.BREED_IMAGE
+    """)
+    return {r["BREED"]: r for r in data if r.get("IMAGE_B64")}
+
+
+def breed_photo(breed: str, size: int = 46, *, state: str = None,
+                radius: str = "50%") -> str:
+    """A round breed thumbnail, or the posture silhouette when there is none.
+
+    THE CAPTION IS NOT DECORATION. This is a photograph of *a* dog of the breed,
+    never of the animal being diagnosed, and the two are trivially confused by
+    anyone glancing at a card. Every photo therefore carries the disclaimer in
+    its tooltip, an amber ring when even the breed is only approximate, and the
+    pages that render one repeat it in text underneath.
+    """
+    rec = breed_photos().get(breed)
+    if not rec:
+        # Built outside the f-string: SiS pins Python 3.11, where reusing the
+        # delimiter quote inside an f-string expression is a syntax error.
+        who = breed or "this breed"
+        return (
+            f'<div style="width:{size}px;height:{size}px;border-radius:{radius};'
+            f'background:{SURFACE};border:1px solid {BORDER};display:flex;'
+            f'align-items:center;justify-content:center;flex:0 0 auto" '
+            f'title="No reference photograph for {who} — drawn silhouette of '
+            f'the current posture instead">'
+            + dog_glyph(state or "STAND", size=int(size * 0.66)) + '</div>')
+    appx = bool(rec.get("IS_APPROXIMATE"))
+    ring = ACCENT if appx else BORDER
+    tip = ("Reference photograph of a similar breed, NOT this dog"
+           if appx else "Reference photograph of the breed, NOT this dog")
+    return (
+        f'<img src="data:image/jpeg;base64,{rec["IMAGE_B64"]}" '
+        f'alt="{breed} reference photograph" title="{breed} — {tip}" '
+        f'style="width:{size}px;height:{size}px;border-radius:{radius};'
+        f'object-fit:cover;border:1.5px solid {ring};flex:0 0 auto;display:block">')
 
 
 def sensor_anatomy_svg(neck_hz=100, back_hz=100) -> str:
@@ -418,6 +573,67 @@ def metric_strip(items: list[tuple[str, str]]) -> None:
         )
 
 
+def esc(text) -> str:
+    """Escape for injection into an unsafe_allow_html block.
+
+    The chat is the only place in this app where text a human typed is put back
+    on the page, and `white-space: pre-line` means it does not need <br> — only
+    the three characters that would end the markup early.
+    """
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+# The two chat avatars, inline. st-chat asks DiceBear for a `bottts` robot and a
+# `fun-emoji` face over HTTPS; SiS blocks that request, so the component's stock
+# avatars would be two broken images. These are the same idea, drawn locally:
+# the product's own dog mark for TELLTAIL, a plain figure for whoever is asking.
+def chat_avatar(is_user: bool) -> str:
+    if not is_user:
+        return (f'<div class="avatar" style="background:{INK};border-color:{INK}">'
+                + dog_glyph("TROT", size=22, colour=CARD) + '</div>')
+    return (
+        f'<div class="avatar">'
+        f'<svg viewBox="0 0 24 24" style="width:19px;height:19px">'
+        f'<circle cx="12" cy="8" r="3.6" fill="none" stroke="{INK_2}" '
+        f'stroke-width="1.8"/>'
+        f'<path d="M4.8,20 Q4.8,14.2 12,14.2 Q19.2,14.2 19.2,20" fill="none" '
+        f'stroke="{INK_2}" stroke-width="1.8" stroke-linecap="round"/>'
+        f'</svg></div>')
+
+
+def chat_bubble(text: str, *, is_user: bool, meta: str = "",
+                hue: str = None) -> None:
+    """One message row: avatar and bubble, the sender deciding the side."""
+    side = " user" if is_user else ""
+    edge = f'border-left:3px solid {hue};' if hue and not is_user else ""
+    st.markdown(
+        f'<div class="tt-chat{side}">{chat_avatar(is_user)}'
+        f'<div class="msg" style="{edge}">{esc(text)}</div></div>'
+        + (f'<div class="tt-chat-meta">{meta}</div>' if meta else ""),
+        unsafe_allow_html=True)
+
+
+def rail_meter(label: str, value: str, frac, hue: str, note: str = "") -> str:
+    """One vitals row in the rail: a label, a number, and the share it is of
+    its whole drawn as a hairline underneath.
+
+    The rail used to be four bare numbers. "38 / 45 dogs" and "3 / 40 queued"
+    look alike at 12px and mean completely different things — a bar is read
+    before the digits are, so the one that is nearly empty is obvious.
+    """
+    try:
+        pct = max(0.0, min(1.0, float(frac)))
+    except (TypeError, ValueError):
+        pct = 0.0
+    tail = f'<span class="tt-quiet"> {note}</span>' if note else ""
+    return (
+        f'<div class="tt-meter"><div class="tt-meter-top">'
+        f'<span>{label}</span><b>{value}{tail}</b></div>'
+        f'<div class="tt-meter-track"><div class="tt-meter-fill" '
+        f'style="width:{pct * 100:.1f}%;background:{hue}"></div></div></div>')
+
+
 def html_table(data: list[dict], columns: list[tuple[str, str]]) -> None:
     """HAZARD 2 fallback. SiS pins an older Streamlit; st.column_config may not
     exist, and st.dataframe of Decimals renders badly. A styled HTML table is
@@ -454,14 +670,25 @@ def fmt(v, nd: int = 2, dash: str = "—") -> str:
 def clean_axes(fig, *, y_zero_line: bool = True):
     """Spec section 15: no gridlines except a single horizontal baseline, no
     chart junk, direct labelling over legends wherever a series can carry its
-    own name."""
+    own name.
+
+    THE LEGEND IS OPT-IN, NOT FORBIDDEN. This used to set showlegend=False
+    unconditionally, which quietly deleted the legend from the charts that
+    genuinely need one — a stack of triage bands or weight bands has nowhere to
+    put a direct label — because clean_axes runs AFTER the caller's
+    update_layout and won the argument. Reading the current value keeps the
+    default (no legend) while letting a caller that asked for one keep it.
+    """
+    legend = bool(fig.layout.showlegend)
     fig.update_layout(
         paper_bgcolor=CARD, plot_bgcolor=CARD,
         font=dict(family="Geist, Inter, sans-serif", size=11, color=INK_2),
-        margin=dict(l=8, r=8, t=28, b=8),
+        # a legend parked below the plot needs floor to stand on, or plotly
+        # crops it to a row of half-height swatches
+        margin=dict(l=8, r=8, t=28, b=46 if legend else 8),
         hoverlabel=dict(bgcolor=CARD, bordercolor=BORDER,
                         font=dict(color=INK, size=11)),
-        showlegend=False,
+        showlegend=legend,
     )
     fig.update_xaxes(showgrid=False, zeroline=False, linecolor=BORDER, ticks="outside",
                      tickcolor=BORDER)
@@ -542,8 +769,14 @@ if heur:
 # queries whether or not you were looking at them — nine pages of Snowflake
 # work to render one. The router below calls exactly one page function.
 #
-# Each page also carries its own accent colour, used for its charts and its
-# rail marker, so you can tell at a glance which page a screenshot came from.
+# Each page also carries its own hue, marking its rail row, its page header and
+# any chrome that belongs to the page rather than to the data — so you can tell
+# at a glance which page a screenshot came from.
+#
+# IT DOES NOT COLOUR THE CHARTS. Colour inside a chart is already spoken for:
+# it means an ethogram state, a triage band, or which sensor a trace came from,
+# and those meanings have to survive a page change. Page hue is chrome; chart
+# colour is data.
 # ===========================================================================
 PAGES = [
     ("Pack",            "the ward round",                   "#B45309"),
@@ -560,23 +793,40 @@ PAGES = [
 
 with st.sidebar:
     st.markdown(
-        '<div style="font-weight:800;font-size:20px;letter-spacing:-.02em;'
-        f'color:{INK}">TELLTAIL</div>'
-        '<div class="tt-quiet" style="margin:-2px 0 10px">'
-        'canine telemetry · Snowflake</div>', unsafe_allow_html=True)
+        '<div class="tt-brand"><div class="tt-brand-mark">'
+        + dog_glyph("TROT", size=24, colour=CARD) +
+        '</div><div><div style="font-weight:800;font-size:19px;'
+        f'letter-spacing:-.02em;color:{INK};line-height:1.1">TELLTAIL</div>'
+        '<div class="tt-quiet" style="font-size:11px">canine telemetry · '
+        'Snowflake</div></div></div>', unsafe_allow_html=True)
+
+    # Numbered, because the nine pages are an argument in order and the numbers
+    # are how you say "look at 4" out loud during a demo. The router still keys
+    # off the bare name, so the labels are cosmetic and cannot desynchronise.
+    _num = {p[0]: i for i, p in enumerate(PAGES)}
     _choice = st.radio(
         "section", [p[0] for p in PAGES], label_visibility="collapsed",
-        format_func=lambda n: n)
+        format_func=lambda n: (f"{_num[n] + 1} · {n}" if _num[n] < 9
+                               else f"·  {n}"))
     _meta = next(p for p in PAGES if p[0] == _choice)
+
+    # The selected row's hue bar. Emitted here rather than in the sheet at the
+    # top because it is the CURRENT page's colour, which is not known until the
+    # radio above has returned.
+    st.markdown(
+        '<style>section[data-testid="stSidebar"] div[role="radiogroup"] > '
+        'label:has(input:checked) { border-left-color: ' + _meta[2] + '; }'
+        '</style>', unsafe_allow_html=True)
     st.markdown(
         f'<div class="tt-railnote" style="border-left:3px solid {_meta[2]}">'
         f'<b>{_meta[0]}</b><br><span class="tt-quiet">{_meta[1]}</span></div>',
         unsafe_allow_html=True)
 
     # The rail carries the state of the pipeline, not blank space. These are
-    # the four numbers worth knowing before reading any page, and they are the
-    # same numbers the pages themselves are computed from — if the rail and a
-    # page disagree, something is stale and you can see it immediately.
+    # the numbers worth knowing before reading any page, and they are the same
+    # numbers the pages themselves are computed from — if the rail and a page
+    # disagree, something is stale and you can see it immediately. Each one is
+    # drawn as a share of its own whole, so a near-empty queue looks near-empty.
     _vit = rows("""
         SELECT
             (SELECT COUNT(*) FROM MARTS.EPOCH_STATES)              AS epochs,
@@ -596,25 +846,49 @@ with st.sidebar:
         _v = _vit[0]
         _lag = _v.get("LAG_S")
         _bad = int(_v.get("DT_BAD") or 0)
+        _dogs = float(_v.get("DOGS") or 0) or 1.0
+        _queued = float(_v.get("QUEUED") or 0) or 1.0
+        # `tot` falls back to 1 to avoid a zero divide, which would make an
+        # empty warehouse claim a confident 100% model-derived. No provenance
+        # rows means the question has no answer yet, so the meter is dropped.
+        _model_share = (1.0 - (heur / tot)) if prov else None
         st.markdown(
+            # Counts stay plain rows. A meter needs a denominator to mean
+            # anything, and "how many matches, out of what?" has no answer —
+            # a full bar next to every count teaches the reader to ignore
+            # the bars that do carry a ratio.
             '<div class="tt-railstat">'
-            f'<div><span>epochs classified</span><b>{fmt(_v.get("EPOCHS"),0)}</b></div>'
-            f'<div><span>syndrome matches</span><b>{fmt(_v.get("MATCHES"),0)}'
-            f'<span class="tt-quiet"> / {fmt(_v.get("DOGS_HIT"),0)} dogs</span></b></div>'
-            f'<div><span>held-out accuracy</span><b>{fmt(_v.get("ACC"),1)}%</b></div>'
-            f'<div><span>attested on chain</span><b>{fmt(_v.get("ON_CHAIN"),0)}'
-            f'<span class="tt-quiet"> / {fmt(_v.get("QUEUED"),0)} queued</span></b></div>'
-            '</div>', unsafe_allow_html=True)
-        _dot = ACCENT if _bad == 0 else "#B91C1C"
-        st.markdown(
-            f'<div class="tt-railfoot"><span style="color:{_dot}">&#9679;</span> '
-            f'dynamic table DAG '
-            f'{"all active" if _bad == 0 else str(_bad) + " not active"}'
-            f'{" · mean lag " + ago(_lag) if _lag is not None else ""}</div>',
+            f'<div><span>epochs classified</span>'
+            f'<b>{fmt(_v.get("EPOCHS"), 0)}</b></div>'
+            f'<div><span>syndrome matches</span>'
+            f'<b>{fmt(_v.get("MATCHES"), 0)}</b></div></div>'
+            + rail_meter("dogs with a finding",
+                         fmt(_v.get("DOGS_HIT"), 0),
+                         float(_v.get("DOGS_HIT") or 0) / _dogs,
+                         "#B91C1C", f'/ {fmt(_v.get("DOGS"), 0)}')
+            + rail_meter("held-out accuracy", f'{fmt(_v.get("ACC"), 1)}%',
+                         float(_v.get("ACC") or 0) / 100.0, "#15803D")
+            + (rail_meter("model-derived states",
+                          f"{100 * _model_share:.1f}%", _model_share, ACCENT)
+               if _model_share is not None else "")
+            + rail_meter("attested on chain", fmt(_v.get("ON_CHAIN"), 0),
+                         float(_v.get("ON_CHAIN") or 0) / _queued,
+                         "#7C3AED", f'/ {fmt(_v.get("QUEUED"), 0)} queued'),
             unsafe_allow_html=True)
+        _dot = "#15803D" if _bad == 0 else "#B91C1C"
+        _dag = "all active" if _bad == 0 else str(_bad) + " not active"
+        _lagtxt = " · mean lag " + ago(_lag) if _lag is not None else ""
+        st.markdown(
+            f'<div style="margin-top:11px"><span class="tt-pill">'
+            f'<span style="color:{_dot};font-size:13px">&#9679;</span> '
+            f'DAG {_dag}{_lagtxt}</span></div>', unsafe_allow_html=True)
 
+    # Photo coverage, said in the rail because the photographs are the one
+    # thing on screen a viewer could reasonably mistake for evidence.
+    _ph = breed_photos()
     st.markdown(
         '<div class="tt-railfoot" style="margin-top:14px">'
+        f'{"Breed photos: " + str(len(_ph)) + " breeds covered. " if _ph else ""}'
         'Not a diagnostic device. Reference photographs are of the breed, '
         'never of the study animal.</div>', unsafe_allow_html=True)
 
@@ -674,6 +948,31 @@ def _page_0():
             empty_state("No pack brief yet.",
                         "AI.T_AI generates it on a task. Nothing is called from this page.")
 
+        # The ward round in one bar: how the pack splits across triage bands.
+        # Reads the `pack` rows already in memory, so it costs no extra query.
+        st.markdown("**Triage mix**")
+        bands: dict = {}
+        for d in pack:
+            k = (d.get("TRIAGE_LABEL") or "not triaged", d.get("TRIAGE_SEVERITY"))
+            bands[k] = bands.get(k, 0) + 1
+        if PLOTLY and bands:
+            ordered = sorted(bands.items(), key=lambda kv: -(kv[0][1] or 0))
+            fig = go.Figure()
+            for (lbl, sev), n in ordered:
+                fig.add_trace(go.Bar(
+                    x=[n], y=["pack"], orientation="h",
+                    marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E"),
+                                line=dict(width=0)),
+                    text=[f"{lbl}: {n} dogs"], hoverinfo="text", showlegend=False))
+            fig.update_layout(barmode="stack",
+                              xaxis=dict(visible=False), yaxis=dict(visible=False))
+            chart(clean_axes(fig), 54)
+            st.markdown(" ".join(
+                f'<span class="tt-chip" style="background:'
+                f'{TRIAGE_COLOUR.get(sev, "#A8A29E")}1c;border-color:'
+                f'{TRIAGE_COLOUR.get(sev, "#A8A29E")}">{lbl} <b>{n}</b></span>'
+                for (lbl, sev), n in ordered), unsafe_allow_html=True)
+
         st.markdown("**Provenance**")
         if prov:
             html_table(
@@ -718,13 +1017,17 @@ def _page_0():
                              if live else '<span style="opacity:.55">&#9675;</span> corpus')
                 spark = sparkline_svg(by_dog.get(d["DOG_ID"]) or [],
                                       colour=ACCENT if live else "#C9C4BE")
+                photo = breed_photo(d.get("BREED"), 44, state=state)
                 with c:
                     st.markdown(f"""
 <div class="tt-card tt-dogcard">
   <div class="tt-dogcard-head">
-    <div class="tt-dogcard-name">
-      <b>Dog {d['DOG_ID']}</b>
-      <span class="tt-quiet tt-breed">{d.get('BREED') or 'unknown breed'}</span>
+    <div class="tt-dogcard-id">
+      {photo}
+      <div class="tt-dogcard-name">
+        <b>Dog {d['DOG_ID']}</b>
+        <span class="tt-quiet tt-breed">{d.get('BREED') or 'unknown breed'}</span>
+      </div>
     </div>
     <span class="tt-badge" style="background:{colour}">{label}</span>
   </div>
@@ -743,6 +1046,21 @@ def _page_0():
     {fmt(d.get('PCT_HEURISTIC') or 0,1)}% heuristic · {freshness}
   </div>
 </div>""", unsafe_allow_html=True)
+
+        # Said once under the grid rather than 45 times inside it, and repeated
+        # in the rail. A photograph implying it is the animal being diagnosed
+        # would be the single most misleading thing on this screen.
+        photos = breed_photos()
+        if photos:
+            n_appx = sum(1 for r in photos.values() if r.get("IS_APPROXIMATE"))
+            st.markdown(
+                f'<div class="tt-quiet" style="margin-top:6px">'
+                f'Thumbnails are <b>reference photographs of the breed</b>, never '
+                f'of the study animal — {len(photos)} breeds covered, {n_appx} of '
+                f'them by a near-matching breed (amber ring). Dogs with no '
+                f'reference photo keep the drawn posture silhouette. '
+                f'{list(photos.values())[0].get("CREDIT") or ""}</div>',
+                unsafe_allow_html=True)
 
 
 # ===========================================================================
@@ -1014,6 +1332,33 @@ def _page_2():
                 FROM MARTS.STATE_BOUTS WHERE dog_id = {dog}
                 GROUP BY state ORDER BY bouts DESC
             """)
+            if PLOTLY and bl:
+                # Median as the bar, mean as a marker on top of it. The GAP
+                # between them is the finding: a state whose mean sits far
+                # above its median is one long bout hiding in a pile of short
+                # ones, which is exactly the shape lameness makes.
+                names = [str(r["STATE"]) for r in bl][::-1]
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=[float(r["MEDIAN_S"] or 0) for r in bl][::-1], y=names,
+                    orientation="h",
+                    marker=dict(color=[palette.get(n, "#D6D3D1") for n in names]),
+                    text=[f'{r["STATE"]}<br>median {fmt(r["MEDIAN_S"],0)}s'
+                          f'<br>mean {fmt(r["MEAN_S"],1)}s'
+                          f'<br>longest {fmt(r["MAX_S"],0)}s'
+                          f'<br>{fmt(r["BOUTS"],0)} bouts' for r in bl][::-1],
+                    hoverinfo="text"))
+                fig.add_trace(go.Scatter(
+                    x=[float(r["MEAN_S"] or 0) for r in bl][::-1], y=names,
+                    mode="markers",
+                    marker=dict(color=INK, size=7, symbol="line-ns-open",
+                                line=dict(width=1.6, color=INK)),
+                    text=[f'mean {fmt(r["MEAN_S"],1)}s' for r in bl][::-1],
+                    hoverinfo="text"))
+                fig.update_layout(title="median bout length (bar) against the mean "
+                                        "(tick) — seconds",
+                                  title_font_size=11)
+                chart(clean_axes(fig, y_zero_line=False), max(200, 26 * len(names)))
             if bl:
                 html_table(
                     [{"s": r["STATE"], "b": fmt(r["BOUTS"], 0), "m": fmt(r["MEAN_S"], 1),
@@ -1057,6 +1402,41 @@ def _page_3():
             by_code[f["SYNDROME_CODE"]] = by_code.get(f["SYNDROME_CODE"], 0) + 1
         metric_strip([("matches", fmt(len(finds), 0))] +
                      [(k, fmt(v, 0)) for k, v in sorted(by_code.items())][:4])
+
+        # WHEN each finding fired, and to WHICH dog. The table below is ordered
+        # by severity and so destroys the time axis; this keeps it, which is how
+        # you see that one dog fired the same syndrome four times in an evening
+        # rather than four dogs firing it once.
+        if PLOTLY:
+            codes = sorted(by_code)
+            cmap = {c: SYMBOL_COLOURS[i % len(SYMBOL_COLOURS)]
+                    for i, c in enumerate(codes)}
+            fig = go.Figure()
+            for c in codes:
+                pts = [f for f in finds if f["SYNDROME_CODE"] == c]
+                fig.add_trace(go.Scatter(
+                    x=[str(f["ONSET_TS"]) for f in pts],
+                    y=[float(f["DOG_ID"]) for f in pts],
+                    mode="markers", name=c,
+                    marker=dict(color=cmap[c], line=dict(width=0),
+                                opacity=0.85,
+                                size=[6 + 10 * float(f["CONFIDENCE"] or 0)
+                                      for f in pts]),
+                    text=[f'{c} · {f["SYNDROME_NAME"]}<br>dog {int(f["DOG_ID"])}'
+                          f' · {f.get("BREED") or "unknown breed"}'
+                          f'<br>{str(f["ONSET_TS"])[:19]}'
+                          f'<br>{fmt(f["DURATION_S"],0)}s over '
+                          f'{fmt(f["N_EPOCHS"],0)} epochs'
+                          f'<br>confidence {fmt(f["CONFIDENCE"],3)}'
+                          f' · severity {f["SEVERITY"]}' for f in pts],
+                    hoverinfo="text"))
+            fig.update_layout(
+                title="every finding in time — one dot per match, sized by "
+                      "confidence, coloured by syndrome",
+                title_font_size=11, showlegend=True,
+                legend=dict(orientation="h", y=-0.2, font=dict(size=10)),
+                yaxis=dict(title="dog id"))
+            chart(clean_axes(fig, y_zero_line=False), 290)
 
         dataframe(
             [{
@@ -1307,6 +1687,48 @@ def _page_4():
                                   title_font_size=11)
                 chart(clean_axes(fig), 300)
 
+            # Where each dog is HEADING, not just where it is. ML.FORECAST
+            # projects the activity index forward per dog; drawn as a dumbbell
+            # so the length of the connector is the size of the move and its
+            # colour is the direction — a column of numbers hides both.
+            st.markdown("**Projected trajectory, every dog**")
+            st.markdown('<span class="tt-quiet">Hollow dot is where the dog is '
+                        'now, solid dot is where ML.FORECAST puts it. Amber '
+                        'connectors are dogs winding down.</span>',
+                        unsafe_allow_html=True)
+            alltraj = rows("""
+                SELECT dog_id, current_index, projected_index, pct_change
+                FROM ML.V_TRAJECTORY
+                WHERE projected_index IS NOT NULL AND current_index IS NOT NULL
+                ORDER BY pct_change
+            """)
+            if PLOTLY and alltraj:
+                fig = go.Figure()
+                for r in alltraj:
+                    cur = float(r["CURRENT_INDEX"] or 0)
+                    proj = float(r["PROJECTED_INDEX"] or 0)
+                    lbl = f'dog {int(r["DOG_ID"])}'
+                    hue = ACCENT if proj < cur else "#0369A1"
+                    fig.add_trace(go.Scatter(
+                        x=[cur, proj], y=[lbl, lbl], mode="lines",
+                        line=dict(color=hue, width=2), hoverinfo="skip"))
+                    fig.add_trace(go.Scatter(
+                        x=[cur, proj], y=[lbl, lbl], mode="markers",
+                        marker=dict(color=[CARD, hue], size=8,
+                                    line=dict(color=hue, width=1.6)),
+                        text=[f'{lbl}<br>now {fmt(cur,4)}',
+                              f'{lbl}<br>projected {fmt(proj,4)}'
+                              f'<br>{fmt(r["PCT_CHANGE"],1)}%'],
+                        hoverinfo="text"))
+                fig.update_layout(title="activity index — now against projected",
+                                  title_font_size=11)
+                chart(clean_axes(fig, y_zero_line=False),
+                      max(220, 22 * len(alltraj)))
+            else:
+                empty_state("No forecasts yet.",
+                            "ML.FORECAST needs ~100 training points per dog; "
+                            "see ML.FUNCTION_STATUS.")
+
 
 # ===========================================================================
 # TAB 6 — VET NOTE.  A clinical document, not a chat bubble.
@@ -1325,6 +1747,35 @@ def _page_5():
             "never calls Cortex: a render path that costs credits is a render "
             "path that will exhaust a trial cap during a demo.")
     else:
+        # The caseload this note sits inside, before the note itself. Which
+        # syndromes generated notes, and how those notes were triaged — from
+        # the rows already fetched, so the overview costs nothing.
+        st.markdown("**The caseload these notes came from**")
+        st.markdown('<span class="tt-quiet">Every cached note, by syndrome and '
+                    'by the triage band AI_CLASSIFY assigned it. Read the bar '
+                    'first, then pick a note out of it.</span>',
+                    unsafe_allow_html=True)
+        if PLOTLY:
+            codes = sorted({n["SYNDROME_CODE"] for n in notes})
+            sevs = sorted({n.get("SEVERITY") for n in notes},
+                          key=lambda s: -(s or 0))
+            fig = go.Figure()
+            for sev in sevs:
+                bucket = [n for n in notes if n.get("SEVERITY") == sev]
+                lbl = (bucket[0].get("TRIAGE_LABEL") if bucket else None) or "untriaged"
+                ys = [sum(1 for n in bucket if n["SYNDROME_CODE"] == c) for c in codes]
+                fig.add_trace(go.Bar(
+                    x=codes, y=ys, name=str(lbl),
+                    marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E")),
+                    text=[f"{c} · {lbl}: {y} notes" for c, y in zip(codes, ys)],
+                    hoverinfo="text"))
+            fig.update_layout(barmode="stack", showlegend=True,
+                              legend=dict(orientation="h", y=-0.18,
+                                          font=dict(size=10)),
+                              title="cached notes by syndrome, stacked by triage band",
+                              title_font_size=11)
+            chart(clean_axes(fig), 230)
+
         labels = [f'{n["SYNDROME_CODE"]} · dog {n["DOG_ID"]} · '
                   f'{str(n["ONSET_TS"])[:19]} · {n["TRIAGE_LABEL"]}' for n in notes]
         i = st.selectbox("finding", range(len(labels)),
@@ -1332,22 +1783,38 @@ def _page_5():
         n = notes[i]
         colour = TRIAGE_COLOUR.get(n.get("SEVERITY"), "#A8A29E")
 
+        photo = breed_photo(n.get("BREED"), 58, radius="6px")
+        appx = (breed_photos().get(n.get("BREED")) or {}).get("IS_APPROXIMATE")
+        # Under a clinical note the caption has to be unambiguous: a reader
+        # skimming a SOAP paragraph beside a dog's face will assume it is the
+        # patient unless told otherwise, in that exact spot, every time.
+        cap = ("reference photo of a<br>similar breed, not this dog"
+               if appx else "reference photo of the<br>breed, not this dog")
         st.markdown(f"""
 <div class="tt-card">
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <div>
-      <span class="tt-badge" style="background:{colour};font-size:12px">
-        {str(n.get('TRIAGE_LABEL','')).upper()}</span>
-      <b style="margin-left:8px;font-size:15px">{n['SYNDROME_NAME']}</b>
-      <span class="tt-quiet"> · {n.get('BODY_SYSTEM')}</span>
+  <div style="display:flex;gap:12px;align-items:flex-start">
+    <div style="flex:0 0 auto;text-align:center">
+      {photo}
+      <div class="tt-quiet" style="font-size:9.5px;line-height:1.25;margin-top:3px;
+           max-width:58px">{cap}</div>
     </div>
-    <div class="tt-quiet">confidence {fmt(n.get('CONFIDENCE'),3)}</div>
-  </div>
-  <div class="tt-quiet" style="margin-top:4px">
-    Dog {n['DOG_ID']} · {n.get('BREED') or 'unknown breed'} ·
-    {fmt(n.get('AGE_YEARS'),1)}y · {fmt(n.get('WEIGHT_KG'),1)}kg ·
-    onset {str(n['ONSET_TS'])[:19]} UTC · {fmt(n.get('DURATION_S'),0)}s ·
-    {fmt(n.get('N_EPOCHS'),0)} epochs
+    <div style="flex:1 1 auto;min-width:0">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span class="tt-badge" style="background:{colour};font-size:12px">
+            {str(n.get('TRIAGE_LABEL','')).upper()}</span>
+          <b style="margin-left:8px;font-size:15px">{n['SYNDROME_NAME']}</b>
+          <span class="tt-quiet"> · {n.get('BODY_SYSTEM')}</span>
+        </div>
+        <div class="tt-quiet">confidence {fmt(n.get('CONFIDENCE'),3)}</div>
+      </div>
+      <div class="tt-quiet" style="margin-top:4px">
+        Dog {n['DOG_ID']} · {n.get('BREED') or 'unknown breed'} ·
+        {fmt(n.get('AGE_YEARS'),1)}y · {fmt(n.get('WEIGHT_KG'),1)}kg ·
+        onset {str(n['ONSET_TS'])[:19]} UTC · {fmt(n.get('DURATION_S'),0)}s ·
+        {fmt(n.get('N_EPOCHS'),0)} epochs
+      </div>
+    </div>
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -1686,6 +2153,31 @@ def _page_7():
                 st.markdown("**Median length of stay, days**")
                 st.markdown('<span class="tt-quiet">The cost of a behavioural '
                             'label, visible in days.</span>', unsafe_allow_html=True)
+                if PLOTLY:
+                    # Behaviour-flagged intakes highlighted against everything
+                    # else, because that is the comparison the tab is making:
+                    # the same shelter, the same breeds, a longer wait.
+                    top = los[:16][::-1]
+                    names = [f'{r["BREED_GROUP"]} · {r["INTAKE_CONDITION"]}'
+                             for r in top]
+                    beh = [str(r["INTAKE_CONDITION"] or "").upper() in
+                           ("BEHAVIOR", "BEHAVIOUR") for r in top]
+                    fig = go.Figure(go.Bar(
+                        x=[float(r["MEDIAN_LOS_DAYS"] or 0) for r in top],
+                        y=names, orientation="h",
+                        marker=dict(color=[ACCENT if b else "#D6D3D1"
+                                           for b in beh]),
+                        text=[f'{n}<br>median {fmt(r["MEDIAN_LOS_DAYS"],1)} days'
+                              f'<br>{fmt(r["N"],0)} animals'
+                              for n, r in zip(names, top)],
+                        hoverinfo="text"))
+                    fig.update_layout(
+                        title="longest waits first — "
+                              f"<span style='color:{ACCENT}'>behaviour</span> "
+                              "intakes against every other condition",
+                        title_font_size=11)
+                    chart(clean_axes(fig, y_zero_line=False),
+                          max(240, 22 * len(names)))
                 html_table([{"b": r["BREED_GROUP"], "c": r["INTAKE_CONDITION"],
                              "d": fmt(r["MEDIAN_LOS_DAYS"], 1), "n": fmt(r["N"], 0)}
                             for r in los[:18]],
@@ -1759,6 +2251,36 @@ def _page_8():
                     'No cron anywhere in the feature, state, transition or '
                     'baseline layers.</span>', unsafe_allow_html=True)
         lag = rows("SELECT * FROM MARTS.V_DAG_LAG ORDER BY schema_name, object_name")
+        if PLOTLY and lag:
+            # Observed against declared, per object. The bar is what the DAG
+            # actually did; the tick is what it promised. A bar past its tick is
+            # a table falling behind its target lag, and that is the one thing
+            # on this page worth noticing from across a room.
+            names = [f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}' for r in lag][::-1]
+            back = lag[::-1]
+            over = [float(r["MEAN_LAG_SEC"] or 0) > float(r["TARGET_LAG_SEC"] or 0)
+                    for r in back]
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=[float(r["MEAN_LAG_SEC"] or 0) for r in back], y=names,
+                orientation="h",
+                marker=dict(color=["#B91C1C" if o else "#D6D3D1" for o in over]),
+                text=[f'{n}<br>mean {fmt(r["MEAN_LAG_SEC"],1)}s'
+                      f'<br>max {fmt(r["MAXIMUM_LAG_SEC"],1)}s'
+                      f'<br>target {fmt(r["TARGET_LAG_SEC"],0)}s'
+                      f'<br>state {r["STATE"]}' for n, r in zip(names, back)],
+                hoverinfo="text"))
+            fig.add_trace(go.Scatter(
+                x=[float(r["TARGET_LAG_SEC"] or 0) for r in back], y=names,
+                mode="markers",
+                marker=dict(color=INK, size=9, symbol="line-ns-open",
+                            line=dict(width=1.6, color=INK)),
+                text=[f'target {fmt(r["TARGET_LAG_SEC"],0)}s' for r in back],
+                hoverinfo="text"))
+            fig.update_layout(title="observed mean lag (bar) against declared "
+                                    "target (tick) — seconds",
+                              title_font_size=11)
+            chart(clean_axes(fig, y_zero_line=False), max(200, 24 * len(names)))
         if lag:
             html_table([{"o": f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}',
                          "t": fmt(r["TARGET_LAG_SEC"], 0),
@@ -1893,13 +2415,14 @@ if st.session_state.get("_errors"):
 def _page_9():
     st.markdown(
         '<div class="tt-card" style="font-size:13px;line-height:1.55">'
-        'Ask about the pack, the syndromes, the classifier or the pipeline. '
-        'The answer is generated by <span class="tt-mono">AI_COMPLETE</span> '
-        'over a factual context assembled from the warehouse in SQL — shown '
-        'in full below every answer, so nothing here is unverifiable. '
-        '<span class="tt-quiet">Cortex on a trial account is capped at roughly '
-        'ten credits of AI Function usage per day; each question is one '
-        'call.</span></div>', unsafe_allow_html=True)
+        'Every answer is <span class="tt-mono">AI_COMPLETE</span> over a '
+        'factual context assembled from the warehouse in SQL, printed in full '
+        'at the bottom of this page — so any number on screen can be traced to '
+        'the table it came from. <span class="tt-quiet">The model is not given '
+        'the conversation, only the facts and the current question, which is '
+        'why it will not follow up on itself. Cortex on a trial account is '
+        'capped at roughly ten credits of AI Function usage per day; each '
+        'question is one call.</span></div>', unsafe_allow_html=True)
 
     facts = rows("""
         SELECT 'holdout' AS topic,
@@ -1953,17 +2476,45 @@ def _page_9():
                            for r in facts if r.get("FACT"))
 
     examples = [
-        "Which syndromes fired, and which found nothing?",
-        "How accurate is the classifier, honestly?",
-        "How does what we detect compare to the Austin shelter outcomes?",
-        "What fraction of states came from the model rather than a heuristic?",
+        ("Which fired?",    "Which syndromes fired, and which found nothing?"),
+        ("How accurate?",   "How accurate is the classifier, honestly?"),
+        ("Versus Austin?",  "How does what we detect compare to the Austin "
+                            "shelter outcomes?"),
+        ("Model or rule?",  "What fraction of states came from the model rather "
+                            "than a heuristic?"),
     ]
-    pick = st.selectbox("start from a question, or write your own", ["—"] + examples)
-    default = "" if pick == "—" else pick
-    q = st.text_input("your question", value=default,
-                      placeholder="e.g. why does S1 not fire?")
 
-    if st.button("Ask", type="primary") and q.strip():
+    # ---- input, taken before the transcript is drawn ----------------------
+    #
+    # st.chat_input pins itself to the bottom of the viewport wherever it is
+    # called, so reading it up here costs nothing visually and lets the answer
+    # be appended to the history BEFORE the transcript renders — one pass, no
+    # rerun, and no version-specific st.rerun/st.experimental_rerun guard.
+    asked = None
+    chips = st.columns(len(examples) + 1)
+    for c, (short, full) in zip(chips, examples):
+        if c.button(short, key="ex_" + short, use_container_width=True):
+            asked = full
+    if chips[-1].button("Clear", key="chat_clear", use_container_width=True):
+        st.session_state["tt_chat"] = []
+
+    if hasattr(st, "chat_input"):
+        typed = st.chat_input("Ask about the pack, the syndromes, the "
+                              "classifier or the pipeline")
+    else:
+        # Older SiS builds have no st.chat_input. A form gives the same
+        # submit-on-enter behaviour and clears itself afterwards.
+        with st.form("tt_chat_form", clear_on_submit=True):
+            fc1, fc2 = st.columns([5, 1])
+            typed = fc1.text_input("your question", label_visibility="collapsed",
+                                   placeholder="e.g. why does S1 not fire?")
+            sent = fc2.form_submit_button("Ask", type="primary")
+        typed = typed if sent else None
+    question = (typed or asked or "").strip()
+
+    history = st.session_state.setdefault("tt_chat", [])
+
+    if question:
         prompt = (
             "You are TELLTAIL, a veterinary telemetry analyst. Answer the "
             "question using ONLY the facts listed below, which come from a "
@@ -1971,18 +2522,38 @@ def _page_9():
             "facts do not contain the answer, say exactly what is missing "
             "rather than guessing. Be concise: at most 130 words. Never imply "
             "this is a diagnosis." + chr(10) * 2 + "FACTS:" + chr(10) + context
-            + chr(10) * 2 + "QUESTION: " + q.strip()
+            + chr(10) * 2 + "QUESTION: " + question
         )
         try:
             ans = rows_live(
                 "SELECT SNOWFLAKE.CORTEX.COMPLETE("
                 + sq(CORTEX_MODEL) + ", " + sq(prompt) + ") AS a")
-            st.markdown(
-                f'<div class="tt-card" style="border-left:3px solid {PAGE_HUE};'
-                f'font-size:14px;line-height:1.6">{one(ans, "A", "")}</div>',
-                unsafe_allow_html=True)
+            history.append({"q": question, "a": one(ans, "A", ""),
+                            "n": len(facts), "ok": True})
         except Exception as exc:  # noqa: BLE001
-            empty_state("Cortex did not answer.", str(exc)[:300])
+            history.append({"q": question, "ok": False,
+                            "a": "Cortex did not answer: " + str(exc)[:280],
+                            "n": len(facts)})
+        st.session_state["tt_chat"] = history
+
+    # ---- transcript -------------------------------------------------------
+    if not history:
+        chat_bubble(
+            "Ask me about the pack, the syndromes, the classifier or the "
+            "pipeline.\n\nI answer only from rows in this warehouse, and the "
+            "exact facts I was handed are printed under every answer. If the "
+            "answer is not in them I will say which table is missing rather "
+            "than invent one.",
+            is_user=False, hue=PAGE_HUE,
+            meta=f"grounded in {len(facts)} facts from SQL · {CORTEX_MODEL}")
+    for turn in history:
+        chat_bubble(turn["q"], is_user=True)
+        chat_bubble(turn["a"], is_user=False,
+                    hue=PAGE_HUE if turn.get("ok") else "#B91C1C",
+                    meta=(f'AI_COMPLETE · {CORTEX_MODEL} · answered from '
+                          f'{turn["n"]} warehouse facts' if turn.get("ok")
+                          else "no answer — the call failed, nothing was "
+                               "substituted for it"))
 
     with st.expander(f"the exact context the model was given ({len(facts)} facts "
                      f"from SQL)"):
