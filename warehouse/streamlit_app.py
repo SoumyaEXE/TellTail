@@ -64,6 +64,15 @@ INK_2 = "#57534E"
 ACCENT = "#B45309"
 GRID = "#F5F5F4"
 
+# Chat surface, taken from the reference build rather than the palette above.
+# The rest of the app is a warm stone scale; a chat transcript is the one place
+# that reads as a conversation rather than a document, and the reference greys
+# are what make it read that way.
+CHAT_BG = "#F0F2F6"
+CHAT_INK = "#262730"
+CHAT_BOT = "#DD6B4D"     # bottts orange
+CHAT_USER = "#FBD7B0"    # fun-emoji peach
+
 TRIAGE_COLOUR = {
     1: "#15803D", "routine monitoring": "#15803D",
     2: "#B45309", "schedule appointment": "#B45309",
@@ -201,24 +210,20 @@ st.markdown(f"""
      tail is anchored to the bubble and points sideways.
      ------------------------------------------------------------------ */
   .tt-chat {{ display:flex; flex-direction:row; align-items:flex-start;
-      width:100%; margin:0 0 9px; }}
+      width:100%; margin:0 0 22px; }}
   .tt-chat.user {{ flex-direction: row-reverse; }}
   .tt-chat .avatar {{ display:flex; align-items:center; justify-content:center;
-      height:2.5rem; width:2.5rem; flex:0 0 auto; margin:3px; overflow:hidden;
-      border-radius:50%; border:1px solid {BORDER}; background:{SURFACE}; }}
-  .tt-chat .msg {{ display:inline-block; position:relative; margin:0 7px;
-      padding:10px 13px; max-width:74%; min-height:1.5rem; line-height:1.55;
-      font-size:13.5px; white-space:pre-line; border-radius:10px;
-      background:{CARD}; border:1px solid {BORDER}; color:{INK}; }}
-  .tt-chat .msg::after {{ content:""; position:absolute; top:13px;
-      display:block; border:0.5em solid transparent;
-      left:-1em; border-right-color:{BORDER}; }}
-  .tt-chat.user .msg {{ background:{SURFACE}; }}
-  .tt-chat.user .msg::after {{ left:auto; right:-1em;
-      border-right-color:transparent; border-left-color:{BORDER}; }}
+      height:48px; width:48px; flex:0 0 auto; margin:0 6px; overflow:hidden;
+      border-radius:50%; }}
+  /* No border and no tail: the reference build draws a plain soft-grey
+     rectangle and lets ALIGNMENT carry the speaker. Adding a rule or a
+     triangle to it is the thing that makes a ported chat look almost-right. */
+  .tt-chat .msg {{ display:inline-block; margin:0 8px; padding:13px 18px;
+      max-width:70%; min-height:1.5rem; line-height:1.7; font-size:16px;
+      white-space:pre-line; border-radius:10px; background:{CHAT_BG};
+      color:{CHAT_INK}; border:none; }}
   .tt-chat .msg p {{ margin-block: 0; }}
-  .tt-chat-meta {{ font-size:10.5px; color:{INK_2}; margin:-4px 0 12px 3.4rem; }}
-  .tt-chat.user + .tt-chat-meta {{ text-align:right; margin:-4px 3.4rem 12px 0; }}
+  .tt-chat-meta {{ font-size:10.5px; color:{INK_2}; margin:-16px 0 22px 68px; }}
   table.tt {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
   table.tt th {{ text-align: left; border-bottom: 1px solid {BORDER}; padding: 5px 8px;
       color: {INK_2}; font-weight: 600; text-transform: uppercase; font-size: 10px;
@@ -422,7 +427,7 @@ def breed_photos() -> dict:
 
 
 def breed_photo(breed: str, size: int = 46, *, state: str = None,
-                radius: str = "50%") -> str:
+                radius: str = "50%", photos: dict = None) -> str:
     """A round breed thumbnail, or the posture silhouette when there is none.
 
     THE CAPTION IS NOT DECORATION. This is a photograph of *a* dog of the breed,
@@ -430,8 +435,13 @@ def breed_photo(breed: str, size: int = 46, *, state: str = None,
     anyone glancing at a card. Every photo therefore carries the disclaimer in
     its tooltip, an amber ring when even the breed is only approximate, and the
     pages that render one repeat it in text underneath.
+
+    PASS `photos` WHEN DRAWING MORE THAN ONE. st.cache_data hands back a fresh
+    copy on every call so that a caller cannot corrupt the cache, and the value
+    cached here is ~450 KB of base64 — the pack grid calls this 45 times, which
+    is 20 MB of copying per rerun if every card looks the table up for itself.
     """
-    rec = breed_photos().get(breed)
+    rec = (photos if photos is not None else breed_photos()).get(breed)
     if not rec:
         # Built outside the f-string: SiS pins Python 3.11, where reusing the
         # delimiter quote inside an f-string expression is a syntax error.
@@ -584,22 +594,46 @@ def esc(text) -> str:
             .replace(">", "&gt;"))
 
 
-# The two chat avatars, inline. st-chat asks DiceBear for a `bottts` robot and a
-# `fun-emoji` face over HTTPS; SiS blocks that request, so the component's stock
-# avatars would be two broken images. These are the same idea, drawn locally:
-# the product's own dog mark for TELLTAIL, a plain figure for whoever is asking.
+# The two chat avatars, inline.
+#
+# st-chat asks DiceBear for a `bottts` robot and a `fun-emoji` face over HTTPS.
+# SiS blocks that request, so the stock component renders two broken images per
+# turn — the one thing that would make this page look unfinished. These are the
+# same two characters redrawn as SVG: nothing to fetch, nothing to break.
 def chat_avatar(is_user: bool) -> str:
     if not is_user:
-        return (f'<div class="avatar" style="background:{INK};border-color:{INK}">'
-                + dog_glyph("TROT", size=22, colour=CARD) + '</div>')
+        return (
+            '<div class="avatar">'
+            '<svg viewBox="0 0 48 48" style="width:48px;height:48px">'
+            f'<circle cx="24" cy="24" r="24" fill="{CARD}"/>'
+            f'<line x1="24" y1="5" x2="24" y2="13" stroke="{CHAT_BOT}" '
+            f'stroke-width="2.4" stroke-linecap="round"/>'
+            f'<circle cx="24" cy="4.4" r="2.7" fill="{CHAT_BOT}"/>'
+            f'<rect x="3.5" y="21" width="4.2" height="9" rx="2.1" '
+            f'fill="{CHAT_BOT}"/>'
+            f'<rect x="40.3" y="21" width="4.2" height="9" rx="2.1" '
+            f'fill="{CHAT_BOT}"/>'
+            f'<rect x="8" y="12" width="32" height="26" rx="7.5" '
+            f'fill="{CHAT_BOT}"/>'
+            '<rect x="13" y="18.5" width="22" height="9.5" rx="4.75" '
+            'fill="#2B2B2B"/>'
+            f'<circle cx="19" cy="23.2" r="2.1" fill="{CARD}"/>'
+            f'<circle cx="29" cy="23.2" r="2.1" fill="{CARD}"/>'
+            '<rect x="18" y="31" width="12" height="2.8" rx="1.4" '
+            'fill="#2B2B2B"/>'
+            '</svg></div>')
     return (
-        f'<div class="avatar">'
-        f'<svg viewBox="0 0 24 24" style="width:19px;height:19px">'
-        f'<circle cx="12" cy="8" r="3.6" fill="none" stroke="{INK_2}" '
-        f'stroke-width="1.8"/>'
-        f'<path d="M4.8,20 Q4.8,14.2 12,14.2 Q19.2,14.2 19.2,20" fill="none" '
-        f'stroke="{INK_2}" stroke-width="1.8" stroke-linecap="round"/>'
-        f'</svg></div>')
+        '<div class="avatar">'
+        '<svg viewBox="0 0 48 48" style="width:48px;height:48px">'
+        f'<circle cx="24" cy="24" r="24" fill="{CHAT_USER}"/>'
+        '<rect x="13.5" y="18" width="4.2" height="4.2" rx="0.6" fill="#2B2B2B"/>'
+        '<rect x="30.3" y="18" width="4.2" height="4.2" rx="0.6" fill="#2B2B2B"/>'
+        '<rect x="17.7" y="21.4" width="2.6" height="2.6" rx="0.5" fill="#2B2B2B"/>'
+        '<rect x="27.7" y="21.4" width="2.6" height="2.6" rx="0.5" fill="#2B2B2B"/>'
+        '<path d="M18.5,30.5 Q24,35.5 29.5,30.5" fill="none" stroke="#2B2B2B" '
+        'stroke-width="2.2" stroke-linecap="round"/>'
+        '<path d="M22.2,32.6 Q24,36.4 25.8,32.6 Z" fill="#E0555B"/>'
+        '</svg></div>')
 
 
 def chat_bubble(text: str, *, is_user: bool, meta: str = "",
@@ -992,6 +1026,7 @@ def _page_0():
             empty_state("No dogs yet.",
                         "Run scripts/load_raw.py then scripts/run_sql.py --all.")
         palette = state_palette()
+        photos = breed_photos()          # once, not once per card
         spark = rows("""
             SELECT dog_id, epoch_ts, activity_index
             FROM MARTS.ACTIVITY_EPOCH
@@ -1017,7 +1052,8 @@ def _page_0():
                              if live else '<span style="opacity:.55">&#9675;</span> corpus')
                 spark = sparkline_svg(by_dog.get(d["DOG_ID"]) or [],
                                       colour=ACCENT if live else "#C9C4BE")
-                photo = breed_photo(d.get("BREED"), 44, state=state)
+                photo = breed_photo(d.get("BREED"), 44, state=state,
+                                    photos=photos)
                 with c:
                     st.markdown(f"""
 <div class="tt-card tt-dogcard">
@@ -1050,7 +1086,6 @@ def _page_0():
         # Said once under the grid rather than 45 times inside it, and repeated
         # in the rail. A photograph implying it is the animal being diagnosed
         # would be the single most misleading thing on this screen.
-        photos = breed_photos()
         if photos:
             n_appx = sum(1 for r in photos.values() if r.get("IS_APPROXIMATE"))
             st.markdown(
@@ -1073,13 +1108,36 @@ def _page_1():
                 'classified into. Same seconds, three levels of abstraction.'
                 '</span>', unsafe_allow_html=True)
 
-    dogs = rows("SELECT DISTINCT dog_id FROM MARTS.EPOCH_STATES ORDER BY dog_id")
+    # ONLY THE DOGS THAT ACTUALLY HAVE A WAVEFORM.
+    #
+    # This picker used to list every dog in MARTS.EPOCH_STATES — all 45,
+    # including the bulk-corpus dogs whose epochs came from CSV and which have
+    # no rows in RAW.COLLAR_TELEMETRY at all. It therefore opened on dog 16,
+    # which has zero samples, and drew three empty panels on the one tab whose
+    # entire job is answering "is any of this real". Most recent feed first, so
+    # it opens on whatever the replayer touched last.
+    dogs = rows("""
+        SELECT dog_id, COUNT(*) AS n_samples, MAX(sample_ts) AS latest
+        FROM RAW.COLLAR_TELEMETRY
+        GROUP BY dog_id
+        ORDER BY latest DESC
+    """)
     if not dogs:
-        empty_state("No classified epochs yet.",
-                    "Start the replayer: python ingest/replay.py --speed 60 --dogs 12")
+        empty_state(
+            "No collar telemetry has landed yet.",
+            "This tab reads RAW.COLLAR_TELEMETRY, which the replayer fills. "
+            "Start it: python ingest/replay.py --speed 60 --dogs 12")
     else:
+        n_classified = one(rows("SELECT COUNT(DISTINCT dog_id) AS n "
+                                "FROM MARTS.EPOCH_STATES"), "N", 0)
+        st.markdown(
+            f'<span class="tt-quiet">{len(dogs)} of {fmt(n_classified, 0)} dogs '
+            f'have a raw waveform to show — the rest are bulk-corpus dogs whose '
+            f'epochs were loaded from CSV, so they appear on every other tab but '
+            f'have no 100 Hz feed to replay here.</span>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 1, 2])
-        dog = c1.selectbox("dog", [int(r["DOG_ID"]) for r in dogs], key="live_dog")
+        dog = c1.selectbox("dog", [int(r["DOG_ID"]) for r in dogs], key="live_dog",
+                           format_func=lambda d: "dog " + str(d))
         window = c2.selectbox("window (seconds)", [30, 60, 120, 300], index=1)
         auto = c3.checkbox("auto-refresh every 15s while the replayer runs", value=False)
         if auto:
@@ -2484,34 +2542,27 @@ def _page_9():
                             "than a heuristic?"),
     ]
 
-    # ---- input, taken before the transcript is drawn ----------------------
+    # ---- submission happens in callbacks ---------------------------------
     #
-    # st.chat_input pins itself to the bottom of the viewport wherever it is
-    # called, so reading it up here costs nothing visually and lets the answer
-    # be appended to the history BEFORE the transcript renders — one pass, no
-    # rerun, and no version-specific st.rerun/st.experimental_rerun guard.
-    asked = None
-    chips = st.columns(len(examples) + 1)
-    for c, (short, full) in zip(chips, examples):
-        if c.button(short, key="ex_" + short, use_container_width=True):
-            asked = full
-    if chips[-1].button("Clear", key="chat_clear", use_container_width=True):
+    # The message box belongs UNDER the transcript, but the answer has to be in
+    # the history BEFORE the transcript renders or it appears one interaction
+    # late. Streamlit runs widget callbacks ahead of the script body, so both
+    # the box and the example buttons only park the question in session state;
+    # the body below picks it up on the same run. Clearing tt_chat_box from
+    # inside its own on_change is the documented way to empty a text input.
+    def _chat_ask(text: str) -> None:
+        st.session_state["tt_chat_pending"] = text
+
+    def _chat_submit() -> None:
+        text = (st.session_state.get("tt_chat_box") or "").strip()
+        st.session_state["tt_chat_box"] = ""
+        if text:
+            st.session_state["tt_chat_pending"] = text
+
+    def _chat_clear() -> None:
         st.session_state["tt_chat"] = []
 
-    if hasattr(st, "chat_input"):
-        typed = st.chat_input("Ask about the pack, the syndromes, the "
-                              "classifier or the pipeline")
-    else:
-        # Older SiS builds have no st.chat_input. A form gives the same
-        # submit-on-enter behaviour and clears itself afterwards.
-        with st.form("tt_chat_form", clear_on_submit=True):
-            fc1, fc2 = st.columns([5, 1])
-            typed = fc1.text_input("your question", label_visibility="collapsed",
-                                   placeholder="e.g. why does S1 not fire?")
-            sent = fc2.form_submit_button("Ask", type="primary")
-        typed = typed if sent else None
-    question = (typed or asked or "").strip()
-
+    question = (st.session_state.pop("tt_chat_pending", None) or "").strip()
     history = st.session_state.setdefault("tt_chat", [])
 
     if question:
@@ -2544,16 +2595,37 @@ def _page_9():
             "exact facts I was handed are printed under every answer. If the "
             "answer is not in them I will say which table is missing rather "
             "than invent one.",
-            is_user=False, hue=PAGE_HUE,
+            is_user=False,
             meta=f"grounded in {len(facts)} facts from SQL · {CORTEX_MODEL}")
     for turn in history:
         chat_bubble(turn["q"], is_user=True)
+        # A bubble is left plain unless the call FAILED. The reference build
+        # has no rule down the side of a message and neither does this, so the
+        # one time a red edge appears it means something.
         chat_bubble(turn["a"], is_user=False,
-                    hue=PAGE_HUE if turn.get("ok") else "#B91C1C",
+                    hue=None if turn.get("ok") else "#B91C1C",
                     meta=(f'AI_COMPLETE · {CORTEX_MODEL} · answered from '
                           f'{turn["n"]} warehouse facts' if turn.get("ok")
                           else "no answer — the call failed, nothing was "
                                "substituted for it"))
+
+    # ---- the message box, under the transcript ---------------------------
+    #
+    # A plain st.text_input rather than st.chat_input: the label sits above the
+    # field and Streamlit prints its own "Press Enter to apply" hint inside it,
+    # which is exactly the input in the reference build. st.chat_input would
+    # tear itself out of the flow and pin to the bottom of the viewport, under
+    # the page footer, which is not where this belongs.
+    st.text_input("Message: ", key="tt_chat_box", on_change=_chat_submit,
+                  placeholder="Ask about the pack, the syndromes, the "
+                              "classifier or the pipeline")
+
+    chips = st.columns(len(examples) + 1)
+    for c, (short, full) in zip(chips, examples):
+        c.button(short, key="ex_" + short, on_click=_chat_ask, args=(full,),
+                 use_container_width=True)
+    chips[-1].button("Clear", key="chat_clear", on_click=_chat_clear,
+                     use_container_width=True)
 
     with st.expander(f"the exact context the model was given ({len(facts)} facts "
                      f"from SQL)"):
