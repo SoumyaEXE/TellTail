@@ -108,6 +108,14 @@ st.markdown(f"""
       border-right: 1px solid {BORDER}; }}
   section[data-testid="stSidebar"] .stRadio > div {{ gap: 1px; }}
   section[data-testid="stSidebar"] label {{ font-size: 13.5px; }}
+  .tt-railstat {{ margin-top: 16px; border-top: 1px solid {BORDER};
+      padding-top: 10px; font-size: 12px; }}
+  .tt-railstat > div {{ display:flex; justify-content:space-between;
+      align-items:baseline; padding: 3px 0; gap: 8px; }}
+  .tt-railstat span {{ color: {INK_2}; }}
+  .tt-railstat b {{ color: {INK}; font-size: 13px; font-variant-numeric: tabular-nums; }}
+  .tt-railfoot {{ margin-top: 10px; font-size: 11px; color: {INK_2};
+      line-height: 1.45; }}
   .tt-railnote {{ margin-top: 14px; padding: 8px 10px; background: {SURFACE};
       border-radius: 0 4px 4px 0; font-size: 12px; line-height: 1.4; }}
   .tt-pagehead {{ padding: 2px 0 2px 12px; margin: 0 0 12px; }}
@@ -564,6 +572,51 @@ with st.sidebar:
         f'<div class="tt-railnote" style="border-left:3px solid {_meta[2]}">'
         f'<b>{_meta[0]}</b><br><span class="tt-quiet">{_meta[1]}</span></div>',
         unsafe_allow_html=True)
+
+    # The rail carries the state of the pipeline, not blank space. These are
+    # the four numbers worth knowing before reading any page, and they are the
+    # same numbers the pages themselves are computed from — if the rail and a
+    # page disagree, something is stale and you can see it immediately.
+    _vit = rows("""
+        SELECT
+            (SELECT COUNT(*) FROM MARTS.EPOCH_STATES)              AS epochs,
+            (SELECT COUNT(*) FROM MARTS.SYNDROME_MATCHES)          AS matches,
+            (SELECT COUNT(DISTINCT dog_id) FROM MARTS.SYNDROME_MATCHES) AS dogs_hit,
+            (SELECT COUNT(*) FROM REF.DOG_INFO)                    AS dogs,
+            (SELECT ROUND(100 * holdout_accuracy, 1) FROM ML.MODEL_SUMMARY) AS acc,
+            (SELECT COUNT(*) FROM ORACLE.PUBLISH_QUEUE
+              WHERE status = 'CONFIRMED')                          AS on_chain,
+            (SELECT COUNT(*) FROM ORACLE.PUBLISH_QUEUE)            AS queued,
+            (SELECT ROUND(AVG(mean_lag_sec)) FROM MARTS.DAG_LAG_SNAPSHOT
+              WHERE mean_lag_sec IS NOT NULL)                      AS lag_s,
+            (SELECT COUNT(*) FROM MARTS.DAG_LAG_SNAPSHOT
+              WHERE state <> 'ACTIVE')                             AS dt_bad
+    """)
+    if _vit:
+        _v = _vit[0]
+        _lag = _v.get("LAG_S")
+        _bad = int(_v.get("DT_BAD") or 0)
+        st.markdown(
+            '<div class="tt-railstat">'
+            f'<div><span>epochs classified</span><b>{fmt(_v.get("EPOCHS"),0)}</b></div>'
+            f'<div><span>syndrome matches</span><b>{fmt(_v.get("MATCHES"),0)}'
+            f'<span class="tt-quiet"> / {fmt(_v.get("DOGS_HIT"),0)} dogs</span></b></div>'
+            f'<div><span>held-out accuracy</span><b>{fmt(_v.get("ACC"),1)}%</b></div>'
+            f'<div><span>attested on chain</span><b>{fmt(_v.get("ON_CHAIN"),0)}'
+            f'<span class="tt-quiet"> / {fmt(_v.get("QUEUED"),0)} queued</span></b></div>'
+            '</div>', unsafe_allow_html=True)
+        _dot = ACCENT if _bad == 0 else "#B91C1C"
+        st.markdown(
+            f'<div class="tt-railfoot"><span style="color:{_dot}">&#9679;</span> '
+            f'dynamic table DAG '
+            f'{"all active" if _bad == 0 else str(_bad) + " not active"}'
+            f'{" · mean lag " + ago(_lag) if _lag is not None else ""}</div>',
+            unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="tt-railfoot" style="margin-top:14px">'
+        'Not a diagnostic device. Reference photographs are of the breed, '
+        'never of the study animal.</div>', unsafe_allow_html=True)
 
 PAGE, PAGE_SUB, PAGE_HUE = _meta
 
