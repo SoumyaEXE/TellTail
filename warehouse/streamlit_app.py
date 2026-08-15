@@ -14,7 +14,9 @@ without reading a word of the post:
   8 Shelter Reality why it matters
   9 Pipeline        how it was built
 
-Plus a tenth page, Ask TELLTAIL, which is Cortex answering only from rows.
+Plus two more: On Chain, the published attestations with a link out to Solana
+Explorer for every one of them, and Ask TELLTAIL, Cortex answering only from
+rows.
 
 SIX SiS-ONLY HAZARDS, ALL HANDLED HERE. Every one of them reproduces nowhere
 else, which is what makes them expensive:
@@ -976,6 +978,7 @@ PAGES = [
     ("Drivers",         "what the model leans on",          "#A16207"),
     ("Shelter Reality", "where this ends up",               "#9D174D"),
     ("Pipeline",        "the DAG, observable",              "#374151"),
+    ("On Chain",        "Solana devnet attestations",       "#0891B2"),
     ("Ask TELLTAIL",    "Cortex over the warehouse",        "#7C2D12"),
 ]
 
@@ -2865,19 +2868,82 @@ def _page_8():
                               title_font_size=11)
             chart(clean_axes(fig), H_SM)
 
+        # ------------------------------------------------------------------
+        # WHO PUBLISHES, AND HOW FAR EACH CLAIM GOT.
+        #
+        # The wallet and cluster are read from REF.PARAMS rather than hardcoded
+        # here, because the bridge is a separate process and the dashboard must
+        # not be able to disagree with it about who signs. The API KEY is
+        # deliberately absent from the warehouse — the host is recorded, the
+        # credential stays in .env beside the keypair. SiS has no outbound
+        # network, so nothing on this page queries Solana; every number here is
+        # the audit trail the bridge wrote back.
+        # ------------------------------------------------------------------
         st.markdown("**On-chain attestations**")
+        chain = {r["KEY"]: r["VALUE_STR"] for r in rows(
+            "SELECT key, value_str FROM REF.PARAMS WHERE key LIKE 'solana%'")}
+        funnel = rows("""
+            SELECT status, COUNT(*) AS n
+            FROM ORACLE.PUBLISH_QUEUE GROUP BY status
+        """)
+        counts = {r["STATUS"]: int(r["N"] or 0) for r in funnel}
+        wallet = chain.get("solana_authority") or "not configured"
+        if chain:
+            st.markdown(f"""
+<div class="tt-card" style="font-size:12px;line-height:1.6">
+  <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div><span class="tt-metric-label">publishing authority</span><br>
+      <a class="tt-mono" href="https://explorer.solana.com/address/{wallet}?cluster={chain.get('solana_cluster','devnet')}"
+         target="_blank">{wallet}</a></div>
+    <div><span class="tt-metric-label">cluster</span><br>
+      <b>{chain.get('solana_cluster','—')}</b> via
+      <span class="tt-mono">{chain.get('solana_rpc_host','—')}</span></div>
+    <div><span class="tt-metric-label">instruction</span><br>
+      <b>{chain.get('solana_mode','—')}</b></div>
+  </div>
+  <div class="tt-quiet" style="margin-top:8px">The private key for this wallet
+  is held only by the bridge process. It is not in this table, this app, or
+  anywhere in Snowflake — a full dump of the warehouse yields no key material,
+  which is checkable rather than asserted.</div>
+</div>""", unsafe_allow_html=True)
+        if PLOTLY and counts:
+            order = [("PENDING", "#D6D3D1"), ("SENT", S_YELLOW),
+                     ("CONFIRMED", "#15803D"), ("FAILED", "#B91C1C")]
+            present = [(s, h) for s, h in order if counts.get(s)]
+            fig = go.Figure()
+            for s, h in present:
+                fig.add_trace(go.Bar(
+                    x=[counts[s]], y=["queue"], orientation="h",
+                    marker=dict(color=h, line=dict(width=1, color=CARD)),
+                    hovertext=[f"{s}: {counts[s]} claims"], hoverinfo="text",
+                    showlegend=False))
+            fig.update_layout(barmode="stack",
+                              xaxis=dict(visible=False), yaxis=dict(visible=False))
+            chart(clean_axes(fig), H_STRIP)
+            st.markdown(" ".join(
+                f'<span class="tt-chip" style="background:{h}22;border-color:{h}">'
+                f'{s.lower()} <b>{counts[s]}</b></span>' for s, h in present),
+                unsafe_allow_html=True)
         st.markdown('<span class="tt-quiet">Snowflake stages the claim; a Node '
                     'bridge holds the key, signs and submits. <b>The keypair never '
-                    'touches Snowflake.</b> Publish the claim, never the data.'
+                    'touches Snowflake.</b> Publish the claim, never the data. '
+                    'The full ledger, with a link to every transaction on Solana '
+                    'Explorer, is on the <b>On Chain</b> page — this panel is '
+                    'here because the publish queue is part of the DAG\'s '
+                    'health, not because it is the interesting view of it.'
                     '</span>', unsafe_allow_html=True)
-        pq = rows("SELECT * FROM ORACLE.V_PUBLISH_STATUS ORDER BY publish_id DESC LIMIT 40")
-        if pq:
+        recent = rows("""
+            SELECT publish_id, subject, syndrome_code, severity, status,
+                   latency_s, tx_signature, explorer_url
+            FROM ORACLE.V_PUBLISH_STATUS ORDER BY publish_id DESC LIMIT 8
+        """)
+        if recent:
             trows = []
-            for r in pq:
-                sig = r.get("TX_SIGNATURE")
-                url = r.get("EXPLORER_URL")
-                link = (f'<a href="{url}" target="_blank" class="tt-mono">'
-                        f'{str(sig)[:16]}…</a>') if url and sig else "—"
+            for r in recent:
+                sig, url = r.get("TX_SIGNATURE"), r.get("EXPLORER_URL")
+                link = (f'<a href="{url}" target="_blank" rel="noopener" '
+                        f'class="tt-mono">{str(sig)[:16]}&#8230;</a>'
+                        ) if url and sig else "—"
                 trows.append({
                     "i": r["PUBLISH_ID"], "s": r["SUBJECT"], "c": r["SYNDROME_CODE"],
                     "v": r["SEVERITY"], "st": r["STATUS"], "l": fmt(r["LATENCY_S"], 0),
@@ -2885,7 +2951,7 @@ def _page_8():
                 })
             html_table(trows, [("i", "#"), ("s", "subject (hashed)"), ("c", "finding"),
                                ("v", "sev"), ("st", "status"), ("l", "latency s"),
-                               ("t", "solscan")])
+                               ("t", "transaction")])
         else:
             empty_state("Nothing queued.",
                         "ORACLE.T_ATTEST stages findings at severity ≥ 2; "
@@ -3092,11 +3158,242 @@ def _page_9():
             st.code(context or "(no facts)", language="text")
 
 
+# ===========================================================================
+# PAGE 10 — ON CHAIN.  The claim, published, and checkable by a stranger.
+#
+# Every row on this page carries a link OUT of this dashboard to Solana
+# Explorer, and that is the entire point: nothing here has to be believed. A
+# reader who does not trust TELLTAIL, Snowflake, or this app can open any
+# transaction and read the claim off the ledger themselves.
+#
+# WHAT IS AND IS NOT PUBLISHED. The subject is a salted hash of the dog id, not
+# the dog. No telemetry, no breed, no owner, no location — a claim that a
+# finding of a given code, severity and confidence occurred in a given window,
+# and nothing that could re-identify the animal. Publish the claim, never the
+# data.
+#
+# SiS HAS NO OUTBOUND NETWORK, so this page cannot query Solana. Everything
+# shown is the audit trail the bridge wrote back into ORACLE.PUBLISH_QUEUE
+# after the network confirmed it. The links are how you check that the
+# warehouse is telling the truth.
+# ===========================================================================
+def _page_10():
+    chain = {r["KEY"]: r["VALUE_STR"] for r in rows(
+        "SELECT key, value_str FROM REF.PARAMS WHERE key LIKE 'solana%'")}
+    cluster = chain.get("solana_cluster", "devnet")
+    wallet = chain.get("solana_authority") or ""
+
+    pq = rows("""
+        SELECT publish_id, subject, syndrome_code, syndrome_name, severity,
+               confidence, onset_ts, duration_s, status, attempts,
+               tx_signature, explorer_url, slot, queued_at, confirmed_at,
+               latency_s, last_error
+        FROM ORACLE.V_PUBLISH_STATUS
+        ORDER BY publish_id
+    """)
+    if not pq:
+        empty_state(
+            "Nothing has been staged for publication yet.",
+            "ORACLE.T_ATTEST queues findings at severity >= 2. Start the "
+            "bridge with: npm run bridge")
+        return
+
+    counts: dict = {}
+    for r in pq:
+        counts[r["STATUS"]] = counts.get(r["STATUS"], 0) + 1
+    done = [r for r in pq if r["STATUS"] == "CONFIRMED" and r.get("TX_SIGNATURE")]
+    # 5,000 lamports is the flat signature fee for a single-signature memo
+    # transaction. Stated because "what does this cost to run" is the first
+    # question anyone asks about putting anything on a chain.
+    fee_sol = len(done) * 5000 / 1e9
+
+    metric_strip([
+        ("attestations on chain", fmt(len(done), 0)),
+        ("dogs attested",         fmt(len({r["SUBJECT"] for r in done}), 0)),
+        ("network fee paid",      f"{fee_sol:.6f} SOL"),
+        ("cluster",               cluster),
+    ])
+
+    # ---- who published, with the way out to Explorer ----------------------
+    if wallet:
+        st.markdown(f"""
+<div class="tt-card">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;
+       gap:14px;flex-wrap:wrap">
+    <div style="min-width:0">
+      <div class="tt-metric-label">publishing authority</div>
+      <a class="tt-mono" style="font-size:13px;word-break:break-all"
+         href="https://explorer.solana.com/address/{wallet}?cluster={cluster}"
+         target="_blank" rel="noopener">{wallet}</a>
+      <div class="tt-quiet" style="margin-top:6px;font-size:12px">
+        Signed and paid for every transaction below. The private key for this
+        wallet is held only by the bridge process — it is not in this table,
+        this app, or anywhere in Snowflake.
+      </div>
+    </div>
+    <a href="https://explorer.solana.com/address/{wallet}?cluster={cluster}"
+       target="_blank" rel="noopener"
+       style="flex:0 0 auto;background:{PAGE_HUE};color:#fff;padding:9px 15px;
+              border-radius:5px;font-size:13px;font-weight:600;
+              text-decoration:none;white-space:nowrap">
+      Open wallet in Solana Explorer &#8599;</a>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("**Publication funnel**")
+        st.markdown('<span class="tt-quiet">Every finding staged by '
+                    '<span class="tt-mono">ORACLE.T_ATTEST</span>, and how far '
+                    'it got. A claim only reaches CONFIRMED once the network '
+                    'has acknowledged the transaction and the bridge has '
+                    'written the signature back.</span>',
+                    unsafe_allow_html=True)
+        if PLOTLY:
+            order = [("PENDING", "#D6D3D1"), ("SENT", S_YELLOW),
+                     ("CONFIRMED", "#15803D"), ("FAILED", "#B91C1C")]
+            present = [(s, h) for s, h in order if counts.get(s)]
+            fig = go.Figure()
+            for s, h in present:
+                fig.add_trace(go.Bar(
+                    x=[counts[s]], y=["queue"], orientation="h",
+                    marker=dict(color=h, line=dict(width=1, color=CARD)),
+                    hovertext=[f"{s}: {counts[s]}"], hoverinfo="text",
+                    showlegend=False))
+            fig.update_layout(barmode="stack", xaxis=dict(visible=False),
+                              yaxis=dict(visible=False))
+            chart(clean_axes(fig), H_STRIP)
+            st.markdown(" ".join(
+                f'<span class="tt-chip" style="background:{h}22;'
+                f'border-color:{h}">{s.lower()} <b>{counts[s]}</b></span>'
+                for s, h in present), unsafe_allow_html=True)
+
+    with c2:
+        st.markdown("**What was attested**")
+        st.markdown('<span class="tt-quiet">By syndrome. Severity 1 findings '
+                    'are never published — routine monitoring is not a claim '
+                    'worth making permanent.</span>', unsafe_allow_html=True)
+        by_code: dict = {}
+        for r in done:
+            by_code[r["SYNDROME_CODE"]] = by_code.get(r["SYNDROME_CODE"], 0) + 1
+        if PLOTLY and by_code:
+            codes = sorted(by_code)
+            fig = go.Figure(go.Bar(
+                x=codes, y=[by_code[c] for c in codes],
+                marker=dict(color=[SYMBOL_COLOURS[i % len(SYMBOL_COLOURS)]
+                                   for i in range(len(codes))]),
+                hovertext=[f"{c}: {by_code[c]} attestations" for c in codes],
+                hoverinfo="text"))
+            fig.update_layout(title="confirmed attestations by syndrome",
+                              title_font_size=11)
+            chart(clean_axes(fig), H_SM)
+
+    # ---- inspect one, byte for byte --------------------------------------
+    st.markdown("---")
+    st.markdown("##### Open any one of them on the ledger")
+    st.markdown('<span class="tt-quiet">Pick an attestation to see the exact '
+                'bytes that went on chain, then follow the link and read the '
+                'same JSON back off Solana Explorer. If the two disagree, this '
+                'dashboard is lying to you.</span>', unsafe_allow_html=True)
+
+    if done:
+        labels = [f'#{r["PUBLISH_ID"]} · {r["SYNDROME_CODE"]} '
+                  f'{r["SYNDROME_NAME"]} · sev {r["SEVERITY"]} · '
+                  f'slot {fmt(r["SLOT"], 0)}' for r in done]
+        i = st.selectbox("attestation", range(len(labels)),
+                         format_func=lambda k: labels[k], key="chain_pick")
+        r = done[i]
+        payload = rows(f"""
+            SELECT payload FROM ORACLE.PUBLISH_QUEUE
+            WHERE publish_id = {int(r["PUBLISH_ID"])}
+        """)
+        p1, p2 = st.columns([3, 2])
+        with p1:
+            st.markdown("**The memo instruction data, as submitted**")
+            st.code(str(one(payload, "PAYLOAD", "") or ""), language="json")
+        with p2:
+            colour = TRIAGE_COLOUR.get(r.get("SEVERITY"), "#A8A29E")
+            st.markdown(f"""
+<div class="tt-card">
+  <div><span class="tt-badge" style="background:{colour}">severity
+    {r.get('SEVERITY')}</span>
+    <b style="margin-left:8px">{r['SYNDROME_CODE']} · {r['SYNDROME_NAME']}</b></div>
+  <div class="tt-quiet" style="margin-top:8px;line-height:1.7">
+    subject <span class="tt-mono">{r['SUBJECT']}</span><br>
+    onset {str(r['ONSET_TS'])[:19]} UTC · {fmt(r.get('DURATION_S'), 0)}s<br>
+    confidence {fmt(r.get('CONFIDENCE'), 3)}<br>
+    slot {fmt(r.get('SLOT'), 0)} · confirmed {str(r.get('CONFIRMED_AT'))[:19]}
+  </div>
+  <div class="tt-mono" style="font-size:11px;word-break:break-all;
+       margin-top:8px;color:{INK_2}">{r.get('TX_SIGNATURE')}</div>
+  <a href="{r.get('EXPLORER_URL')}" target="_blank" rel="noopener"
+     style="display:inline-block;margin-top:10px;background:{PAGE_HUE};
+            color:#fff;padding:8px 14px;border-radius:5px;font-size:13px;
+            font-weight:600;text-decoration:none">
+    View this transaction &#8599;</a>
+</div>""", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="tt-quiet" style="margin-top:8px;font-size:11.5px">'
+                'The subject is a salted hash of the dog id. No telemetry, no '
+                'breed, no owner, no location is published — only that a '
+                'finding of this code and severity occurred in this window. '
+                'Publish the claim, never the data.</div>',
+                unsafe_allow_html=True)
+
+    # ---- the whole ledger -------------------------------------------------
+    st.markdown("---")
+    st.markdown("##### Every attestation")
+    fc1, fc2 = st.columns([1, 3])
+    codes_all = sorted({r["SYNDROME_CODE"] for r in pq})
+    pick_code = fc1.selectbox("syndrome", ["all"] + codes_all, key="chain_code")
+    shown = [r for r in pq
+             if pick_code == "all" or r["SYNDROME_CODE"] == pick_code]
+    fc2.markdown(f'<div class="tt-quiet" style="padding-top:30px">'
+                 f'{len(shown)} of {len(pq)} claims · every link opens Solana '
+                 f'Explorer on {cluster}</div>', unsafe_allow_html=True)
+
+    trows = []
+    for r in shown:
+        sig, url = r.get("TX_SIGNATURE"), r.get("EXPLORER_URL")
+        link = (f'<a href="{url}" target="_blank" rel="noopener" '
+                f'class="tt-mono">{str(sig)[:20]}&#8230; &#8599;</a>'
+                if url and sig else
+                f'<span class="tt-quiet">{r.get("LAST_ERROR") or "—"}</span>')
+        trows.append({
+            "i": r["PUBLISH_ID"], "s": r["SUBJECT"], "c": r["SYNDROME_CODE"],
+            "n": r["SYNDROME_NAME"], "v": r["SEVERITY"],
+            "f": fmt(r.get("CONFIDENCE"), 3),
+            "st": r["STATUS"], "sl": fmt(r.get("SLOT"), 0), "t": link,
+        })
+    html_table(trows, [("i", "#"), ("s", "subject (hashed)"), ("c", "code"),
+                       ("n", "finding"), ("v", "sev"), ("f", "conf"),
+                       ("st", "status"), ("sl", "slot"),
+                       ("t", "transaction")])
+
+    st.markdown(f"""
+<div class="tt-card" style="font-size:13px;line-height:1.7;margin-top:14px">
+<b>Why any of this is on a chain at all.</b><br>
+A shelter taking in a dog has no way to check what a previous owner's app
+claims about it, and no reason to trust a vendor's database that the vendor can
+edit. An attestation is a claim with a timestamp that its author cannot quietly
+revise: <b>{fmt(len(done), 0)}</b> findings are now published on Solana
+{cluster}, each one signed by the wallet above and readable by anyone with the
+link — no account, no API key, no permission from us.
+<br><br>
+<span class="tt-quiet">Devnet, not mainnet: this is a demonstration of the
+mechanism, and devnet SOL has no value. Nothing about the architecture changes
+on mainnet except the cluster and the cost. TELLTAIL is not a diagnostic device
+and an attestation is a record of what the pipeline found, not a
+diagnosis.</span>
+</div>""", unsafe_allow_html=True)
+
+
 PAGE_FN = {
     "Pack": _page_0, "Live Collar": _page_1, "Ethogram": _page_2,
     "Syndromes": _page_3, "Baselines": _page_4, "Vet Note": _page_5,
     "Drivers": _page_6, "Shelter Reality": _page_7, "Pipeline": _page_8,
-    "Ask TELLTAIL": _page_9,
+    "On Chain": _page_10, "Ask TELLTAIL": _page_9,
 }
 PAGE_FN[PAGE]()
 

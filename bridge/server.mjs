@@ -273,15 +273,32 @@ async function main() {
   const balance = await connection.getBalance(keypair.publicKey);
   console.log(`  balance    ${balance / LAMPORTS_PER_SOL} SOL`);
   if (balance === 0 && !DRY) {
+    const kpPath = process.env.SOLANA_KEYPAIR_PATH || "./secrets/devnet.json";
     console.error("");
-    console.error("  The signer has no devnet SOL, so it cannot pay a fee. Either:");
-    console.error(`    1. fund it from the authority wallet:`);
-    console.error(`         solana transfer ${signer} 0.5 --url devnet --allow-unfunded-recipient`);
-    console.error(`    2. or use the faucet:  https://faucet.solana.com`);
-    console.error(`    3. or export the authority wallet's keypair to`);
-    console.error(`         ${process.env.SOLANA_KEYPAIR_PATH || "./secrets/devnet.json"}`);
+    console.error("  The signer holds 0 SOL, so it cannot pay a transaction fee.");
     console.error("");
-    console.error("  Meanwhile `npm run bridge:dry` shows exactly what would be signed.");
+    console.error("  Devnet faucets are exhausted quickly and are NOT a reliable");
+    console.error("  path — both the public faucet and the Helius per-project");
+    console.error("  allowance rate-limit hard. Fund from a wallet you control:");
+    console.error("");
+    if (AUTHORITY && AUTHORITY !== signer) {
+      console.error(`    A. Make ${AUTHORITY}`);
+      console.error(`       the actual signer — export ITS keypair to`);
+      console.error(`         ${kpPath}`);
+      console.error("       as a JSON byte array. Then the wallet named in every");
+      console.error("       payload is also the wallet that pays, which is the");
+      console.error("       strongest form of the claim. Move the file; never");
+      console.error("       paste a secret key into a terminal or a chat.");
+      console.error("");
+      console.error(`    B. Or keep this signer and send it devnet SOL from`);
+      console.error(`       ${AUTHORITY} — 0.5 SOL covers thousands of memos:`);
+      console.error(`         recipient  ${signer}`);
+      console.error("       The authority stays recorded in every payload.");
+    } else {
+      console.error(`    Send devnet SOL to  ${signer}`);
+    }
+    console.error("");
+    console.error("  `npm run bridge:dry` shows exactly what would be signed.");
     process.exit(1);
   }
 
