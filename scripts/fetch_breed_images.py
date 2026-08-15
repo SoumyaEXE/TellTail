@@ -57,6 +57,9 @@ from _common import (  # noqa: E402
 
 SLUG = "jessicali9530/stanford-dogs-dataset"
 URL = f"https://www.kaggle.com/api/v1/datasets/download/{SLUG}"
+# Filled in by main() once the signed storage redirect has been followed.
+RESOLVED: list[str] = [URL]
+
 CREDIT = ("Stanford Dogs Dataset (Khosla et al., FGVC 2011), via Kaggle "
           "jessicali9530/stanford-dogs-dataset. Reference breed photograph, "
           "not the study animal.")
@@ -110,20 +113,22 @@ def auth_headers() -> dict:
 
 
 def rng(session, headers: dict, start: int, end: int) -> bytes:
-    """Fetch bytes [start, end] inclusive.
+    """Fetch bytes [start, end] inclusive, from the RESOLVED storage URL.
 
-    Takes a requests.Session, not the module. Every range is a fresh redirect
-    from kaggle.com to storage plus a TLS handshake; on a bare requests.get
-    that is the whole cost of the fetch — thirty-odd round trips took minutes
-    while the bytes themselves took seconds. One pooled connection makes the
-    same work take about as long as the transfer deserves.
+    Kaggle's /datasets/download endpoint answers with a fresh signed redirect
+    to Google Cloud Storage on every single call, and paying for that redirect
+    per range costs about forty seconds a piece — thirty-odd of them turned a
+    few megabytes of transfer into ten minutes. The signed URL is good for the
+    life of this run, so it is resolved once in main() and every range goes
+    straight at storage: ~0.5s each, measured.
     """
     h = dict(headers)
     h["Range"] = f"bytes={start}-{end}"
-    r = session.get(URL, headers=h, stream=True, allow_redirects=True, timeout=180)
+    r = session.get(RESOLVED[0], headers=h, stream=True, timeout=180)
     if r.status_code not in (200, 206):
         r.close()
-        die(f"range request returned {r.status_code}; the mirror may have changed")
+        die(f"range request returned {r.status_code}; the signed URL may have "
+            f"expired — rerun the script")
     data = r.raw.read(end - start + 1, decode_content=True)
     r.close()
     return data
@@ -202,6 +207,7 @@ def main() -> int:
                          allow_redirects=True, timeout=120)
     total = int(probe.headers.get("Content-Length", 0))
     status, accepts = probe.status_code, probe.headers.get("Accept-Ranges")
+    RESOLVED[0] = probe.url          # the signed GCS URL, reused for every range
     probe.close()
     if status != 200 or not total:
         die(f"GET returned {status} with Content-Length {total}")
