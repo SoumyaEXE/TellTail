@@ -131,6 +131,11 @@ CREATE TABLE IF NOT EXISTS ML.FUNCTION_STATUS (
     ran_at      TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
 );
 
+-- FULLY QUALIFIED VIEW NAMES BELOW. SYSTEM$REFERENCE resolves its argument
+-- without the procedure's USE DATABASE / USE SCHEMA context, so a bare
+-- 'ML.V_ACTIVITY_TRAIN' fails with "View 'ML.V_ACTIVITY_TRAIN' does not exist
+-- or not authorized" even while the view sits there with 2,027 rows in it.
+-- Same trap as SYSTEM$QUERY_REFERENCE in 05_ml_classification.sql.
 CREATE OR REPLACE PROCEDURE ML.SP_RUN_FORECAST()
 RETURNS STRING
 LANGUAGE SQL
@@ -139,6 +144,12 @@ $$
 DECLARE
     horizon NUMBER;
     n_train NUMBER;
+    -- SQLERRM is not a valid identifier inside a DML statement, only inside an
+    -- expression assignment. Bare in the INSERT below, the handler itself
+    -- raised "invalid identifier 'SQLERRM'" — so the task died on the very line
+    -- meant to record why it died, and ML.FUNCTION_STATUS never learned. Park
+    -- it in a variable and bind that.
+    err      STRING DEFAULT '';
 BEGIN
     SELECT value_num INTO :horizon FROM REF.PARAMS WHERE key = 'forecast_horizon';
     SELECT COUNT(*) INTO :n_train FROM ML.V_ACTIVITY_TRAIN;
@@ -152,7 +163,7 @@ BEGIN
 
     BEGIN
         CREATE OR REPLACE SNOWFLAKE.ML.FORECAST ML.ACTIVITY_FORECASTER(
-            INPUT_DATA          => SYSTEM$REFERENCE('VIEW', 'ML.V_ACTIVITY_TRAIN'),
+            INPUT_DATA          => SYSTEM$REFERENCE('VIEW', '${SNOWFLAKE_DATABASE}.ML.V_ACTIVITY_TRAIN'),
             SERIES_COLNAME      => 'SERIES',
             TIMESTAMP_COLNAME   => 'TS',
             TARGET_COLNAME      => 'ACTIVITY_INDEX'
@@ -176,11 +187,12 @@ BEGIN
         RETURN 'FORECAST: ' || (SELECT COUNT(*) FROM ML.ACTIVITY_FORECAST) || ' points';
     EXCEPTION
         WHEN OTHER THEN
+            err := SQLERRM;
             CREATE TABLE IF NOT EXISTS ML.ACTIVITY_FORECAST (
                 dog_id NUMBER, forecast_ts TIMESTAMP_NTZ, forecast FLOAT,
                 lower_bound FLOAT, upper_bound FLOAT, generated_at TIMESTAMP_NTZ);
             INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
-            VALUES ('FORECAST', 'FAILED', SQLERRM, 0);
+            VALUES ('FORECAST', 'FAILED', :err, 0);
             RETURN 'FORECAST failed (recorded, build continues): ' || SQLERRM;
     END;
 END;
@@ -194,6 +206,7 @@ $$
 DECLARE
     n_train  NUMBER;
     n_detect NUMBER;
+    err      STRING DEFAULT '';
 BEGIN
     SELECT COUNT(*) INTO :n_train  FROM ML.V_ACTIVITY_TRAIN;
     SELECT COUNT(*) INTO :n_detect FROM ML.V_ACTIVITY_DETECT;
@@ -207,7 +220,7 @@ BEGIN
 
     BEGIN
         CREATE OR REPLACE SNOWFLAKE.ML.ANOMALY_DETECTION ML.ACTIVITY_DETECTOR(
-            INPUT_DATA        => SYSTEM$REFERENCE('VIEW', 'ML.V_ACTIVITY_TRAIN'),
+            INPUT_DATA        => SYSTEM$REFERENCE('VIEW', '${SNOWFLAKE_DATABASE}.ML.V_ACTIVITY_TRAIN'),
             SERIES_COLNAME    => 'SERIES',
             TIMESTAMP_COLNAME => 'TS',
             TARGET_COLNAME    => 'ACTIVITY_INDEX',
@@ -215,7 +228,7 @@ BEGIN
         );
 
         CALL ML.ACTIVITY_DETECTOR!DETECT_ANOMALIES(
-            INPUT_DATA        => SYSTEM$REFERENCE('VIEW', 'ML.V_ACTIVITY_DETECT'),
+            INPUT_DATA        => SYSTEM$REFERENCE('VIEW', '${SNOWFLAKE_DATABASE}.ML.V_ACTIVITY_DETECT'),
             SERIES_COLNAME    => 'SERIES',
             TIMESTAMP_COLNAME => 'TS',
             TARGET_COLNAME    => 'ACTIVITY_INDEX'
@@ -249,13 +262,14 @@ BEGIN
             || ' flagged of ' || (SELECT COUNT(*) FROM ML.ACTIVITY_ANOMALIES);
     EXCEPTION
         WHEN OTHER THEN
+            err := SQLERRM;
             CREATE TABLE IF NOT EXISTS ML.ACTIVITY_ANOMALIES (
                 dog_id NUMBER, anomaly_ts TIMESTAMP_NTZ, observed FLOAT, forecast FLOAT,
                 lower_bound FLOAT, upper_bound FLOAT, is_anomaly BOOLEAN,
                 percentile FLOAT, distance FLOAT, is_synthetic BOOLEAN,
                 generated_at TIMESTAMP_NTZ);
             INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
-            VALUES ('ANOMALY_DETECTION', 'FAILED', SQLERRM, 0);
+            VALUES ('ANOMALY_DETECTION', 'FAILED', :err, 0);
             RETURN 'ANOMALY failed (recorded, build continues): ' || SQLERRM;
     END;
 END;

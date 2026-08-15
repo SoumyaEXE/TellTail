@@ -11,8 +11,14 @@
 name: sf_env
 channels:
   - snowflake
+# NO `- python=3.11` HERE. Streamlit in Snowflake resolves this file against the
+# `snowflake` Anaconda channel, which carries no package literally named
+# `python`, so pinning it fails the whole app at load with
+#   'Packages not found: python==3.11'
+# and the app never renders. The interpreter version is a property of the
+# STREAMLIT object, not a dependency — SiS pins 3.11 itself, which is exactly
+# why tests/sis_compat.py parses the app under 3.11 before deploying.
 dependencies:
-  - python=3.11
   - plotly
   - pandas
   - numpy

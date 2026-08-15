@@ -83,6 +83,26 @@ st.markdown(f"""
   .tt-metric-label {{ font-size: 11px; text-transform: uppercase;
       letter-spacing: .06em; color: {INK_2}; }}
   .tt-metric-value {{ font-size: 26px; font-weight: 600; color: {INK}; line-height: 1.1; }}
+  /* The pack grid. Every card is the same height and the sparkline is pinned
+     to the bottom, so 45 cards read as a grid instead of a ragged column.
+     Breed names run from "Beauceron" to "Nova Scotia Duck Tolling Retriever";
+     left to themselves they wrap onto a second line, shove the triage badge
+     down, and every card in that row ends up a different height. */
+  .tt-dogcard {{ display:flex; flex-direction:column; min-height: 168px;
+      margin-bottom: 8px; padding: 11px 13px; }}
+  .tt-dogcard-head {{ display:flex; justify-content:space-between;
+      align-items:flex-start; gap:8px; }}
+  .tt-dogcard-name {{ min-width:0; }}
+  .tt-dogcard-name b {{ font-size:15px; white-space:nowrap; }}
+  /* clip rather than wrap: the badge must stay on the first line */
+  .tt-breed {{ display:block; overflow:hidden; text-overflow:ellipsis;
+      white-space:nowrap; max-width:100%; }}
+  .tt-badge {{ white-space:nowrap; flex:0 0 auto; }}
+  .tt-chiprow {{ display:flex; flex-wrap:wrap; gap:4px; }}
+  /* margin-top:auto pushes the sparkline and footer to the card floor, which
+     is what makes the bottom edges line up across a row */
+  .tt-spark {{ margin-top:auto; padding-top:8px; }}
+  .tt-dogcard-foot {{ margin-top:4px; }}
   .tt-chip {{ display:inline-block; padding: 1px 7px; border-radius: 3px;
       font-size: 11px; font-weight: 600; border: 1px solid {BORDER}; }}
   .tt-badge {{ display:inline-block; padding: 2px 9px; border-radius: 3px;
@@ -141,6 +161,154 @@ def col(data: list[dict], name: str, default=None) -> list:
 
 def one(data: list[dict], name: str, default=None):
     return data[0].get(name, default) if data else default
+
+
+def ago(seconds) -> str:
+    """Seconds since the last epoch, in units a human reads at a glance.
+
+    The raw number is unreadable past a minute or two — the bulk corpus dogs
+    were recorded in 2018 and rendered as "stale 17,715,743s", which says
+    nothing except that something is broken. Past a week it is not staleness at
+    all, it is the archive, and the caller labels it as such.
+    """
+    try:
+        v = float(seconds or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if v < 90:
+        return f"{v:.0f}s"
+    if v < 5400:
+        return f"{v / 60:.0f}m"
+    if v < 172800:
+        return f"{v / 3600:.0f}h"
+    return f"{v / 86400:.0f}d"
+
+
+def sparkline_svg(series, width=260, height=34, colour=None) -> str:
+    """A sparkline as inline SVG, drawn INSIDE the card markup.
+
+    Was one st.plotly_chart per dog, rendered after the card's closing div —
+    which put a figure-sized gap under every card, let the cards and their
+    sparklines drift apart on reflow, and paid for 45 Plotly figures on the
+    first tab. An SVG polyline costs nothing and belongs to the card.
+    """
+    pts = []
+    for x in series or []:
+        try:
+            pts.append(float(x))
+        except (TypeError, ValueError):
+            pass
+    if len(pts) < 3:
+        return f'<div style="height:{height}px"></div>'
+    lo, hi = min(pts), max(pts)
+    rng = (hi - lo) or 1.0
+    step = width / (len(pts) - 1)
+    coords = " ".join(
+        f"{i * step:.1f},{height - 3 - ((v - lo) / rng) * (height - 6):.1f}"
+        for i, v in enumerate(pts)
+    )
+    return (
+        f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="none" '
+        f'style="width:100%;height:{height}px;display:block">'
+        f'<polyline points="{coords}" fill="none" '
+        f'stroke="{colour or ACCENT}" stroke-width="1.2" '
+        f'stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>'
+    )
+
+
+# --------------------------------------------------------------------------
+# The dog, drawn rather than photographed.
+#
+# Streamlit in Snowflake has no outbound internet, so every <img src="http...">
+# renders as a broken icon — no breed photos, no CDN illustrations, no matter
+# how much nicer they would look. Inline SVG is the only picture that survives
+# the sandbox, and it is the more useful picture anyway: what a viewer needs is
+# not what a Beauceron looks like, it is WHERE THE TWO SENSORS SIT, because the
+# whole detection argument rests on the relationship between them.
+# --------------------------------------------------------------------------
+
+# One silhouette per posture, so a state reads as a shape before it reads as a
+# word. Paths are deliberately crude — a recognisable stance beats a portrait.
+_DOG_BODY = {
+    "stand": "M14,44 L14,30 Q14,22 24,21 L52,21 Q62,22 62,30 L62,44 M20,44 L20,58 "
+             "M30,44 L30,58 M48,44 L48,58 M58,44 L58,58",
+    "rest":  "M12,52 Q12,44 24,44 L54,44 Q66,44 66,52 L66,58 L12,58 Z",
+    "sit":   "M16,44 L16,30 Q16,22 26,21 L52,21 Q62,22 62,34 L62,58 L46,58 "
+             "Q40,50 30,50 L20,58 Z",
+    "move":  "M14,42 L14,28 Q14,20 24,19 L52,19 Q62,20 62,28 L62,42 M18,42 L12,58 "
+             "M28,42 L34,58 M48,42 L42,58 M58,42 L64,58",
+}
+_STATE_POSE = {
+    "REST": "rest", "SIT": "sit", "STAND": "stand", "SNIFF": "stand",
+    "WALK": "move", "TROT": "move", "GALLOP": "move", "PLAY": "move",
+    "PACE": "move", "CIRCLE": "move", "SHAKE": "stand", "SCRATCH": "sit",
+    "PAUSE": "stand", "SLOW_TRANSITION": "sit", "UNKNOWN": "stand",
+}
+
+
+def dog_glyph(state: str, size: int = 42, colour: str = None) -> str:
+    """A small posture silhouette for a state. Used as an inline icon."""
+    pose = _STATE_POSE.get((state or "").upper(), "stand")
+    col = colour or INK_2
+    return (
+        f'<svg viewBox="0 0 78 66" style="width:{size}px;height:{int(size*66/78)}px;'
+        f'vertical-align:middle" aria-label="{state}">'
+        f'<path d="{_DOG_BODY[pose]}" fill="none" stroke="{col}" stroke-width="3.4" '
+        f'stroke-linecap="round" stroke-linejoin="round"/>'
+        f'<circle cx="66" cy="24" r="7" fill="none" stroke="{col}" stroke-width="3.4"/>'
+        f'</svg>'
+    )
+
+
+def sensor_anatomy_svg(neck_hz=100, back_hz=100) -> str:
+    """Where the two IMUs sit, and which features each one produces.
+
+    This is the diagram the whole build argues from: one sensor on the collar,
+    one on the back harness, and the CORRELATION BETWEEN THEM is what separates
+    a dog that is travelling (both sensors move together) from a dog whose head
+    is doing something its body is not (shaking, scratching, sniffing).
+    """
+    return f'''
+<svg viewBox="0 0 520 210" style="width:100%;max-width:520px;height:auto">
+  <path d="M70,120 L70,86 Q70,66 96,64 L286,64 Q312,66 312,86 L312,120"
+        fill="none" stroke="{INK_2}" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M92,120 L88,168 M132,120 L138,168 M252,120 L246,168 M298,120 L304,168"
+        fill="none" stroke="{INK_2}" stroke-width="6" stroke-linecap="round"/>
+  <path d="M312,74 Q344,62 352,40" fill="none" stroke="{INK_2}"
+        stroke-width="6" stroke-linecap="round"/>
+  <circle cx="72" cy="58" r="26" fill="none" stroke="{INK_2}" stroke-width="6"/>
+  <path d="M52,38 L46,20 L66,30" fill="none" stroke="{INK_2}" stroke-width="5"
+        stroke-linejoin="round"/>
+
+  <circle cx="104" cy="66" r="13" fill="{ACCENT}" opacity="0.9"/>
+  <circle cx="104" cy="66" r="21" fill="none" stroke="{ACCENT}" stroke-width="2"
+          opacity="0.45"/>
+  <line x1="104" y1="45" x2="104" y2="24" stroke="{ACCENT}" stroke-width="1.5"/>
+  <text x="104" y="18" text-anchor="middle" font-size="12" font-weight="700"
+        fill="{ACCENT}">NECK · {neck_hz} Hz</text>
+
+  <circle cx="246" cy="66" r="13" fill="#2563EB" opacity="0.9"/>
+  <circle cx="246" cy="66" r="21" fill="none" stroke="#2563EB" stroke-width="2"
+          opacity="0.45"/>
+  <line x1="246" y1="45" x2="246" y2="24" stroke="#2563EB" stroke-width="1.5"/>
+  <text x="246" y="18" text-anchor="middle" font-size="12" font-weight="700"
+        fill="#2563EB">BACK · {back_hz} Hz</text>
+
+  <path d="M118,80 Q175,104 232,80" fill="none" stroke="{INK}" stroke-width="2"
+        stroke-dasharray="5 4"/>
+  <text x="175" y="122" text-anchor="middle" font-size="12" font-weight="700"
+        fill="{INK}">CORR(vm_neck, vm_back)</text>
+  <text x="175" y="138" text-anchor="middle" font-size="11" fill="{INK_2}">
+    high = whole body travelling · low = head acting alone</text>
+
+  <text x="380" y="66" font-size="11" font-weight="700" fill="{ACCENT}">from the collar</text>
+  <text x="380" y="82" font-size="11" fill="{INK_2}">vm_neck_std · zcr_neck</text>
+  <text x="380" y="97" font-size="11" fill="{INK_2}">pitch_var · yaw_consistency</text>
+  <text x="380" y="126" font-size="11" font-weight="700" fill="#2563EB">from the harness</text>
+  <text x="380" y="142" font-size="11" fill="{INK_2}">vm_back_mean · dyn_back</text>
+  <text x="380" y="157" font-size="11" fill="{INK_2}">energy_back · sma_back</text>
+</svg>'''
 
 
 def empty_state(what: str, fix: str) -> None:
@@ -277,16 +445,58 @@ if heur:
         f'&#39;HEURISTIC&#39;</span> in the data. Not a diagnostic device.</div>',
         unsafe_allow_html=True)
 
-TABS = st.tabs([
-    "1 · Pack", "2 · Live Collar", "3 · Ethogram", "4 · Syndromes", "5 · Baselines",
-    "6 · Vet Note", "7 · Drivers", "8 · Shelter Reality", "9 · Pipeline",
-])
+# ===========================================================================
+# NAVIGATION
+#
+# A left rail rather than st.tabs, for a reason that is not taste: EVERY
+# st.tabs body executes on every rerun, so the nine pages each fired their
+# queries whether or not you were looking at them — nine pages of Snowflake
+# work to render one. The router below calls exactly one page function.
+#
+# Each page also carries its own accent colour, used for its charts and its
+# rail marker, so you can tell at a glance which page a screenshot came from.
+# ===========================================================================
+PAGES = [
+    ("Pack",            "the ward round",                   "#B45309"),
+    ("Live Collar",     "100 Hz, two sensors",              "#0F766E"),
+    ("Ethogram",        "states, transitions, bouts",       "#6D28D9"),
+    ("Syndromes",       "MATCH_RECOGNIZE",                  "#B91C1C"),
+    ("Baselines",       "each dog against itself",          "#1D4ED8"),
+    ("Vet Note",        "Cortex handoff",                   "#047857"),
+    ("Drivers",         "what the model leans on",          "#A16207"),
+    ("Shelter Reality", "where this ends up",               "#9D174D"),
+    ("Pipeline",        "the DAG, observable",              "#374151"),
+    ("Ask TELLTAIL",    "Cortex over the warehouse",        "#7C2D12"),
+]
+
+with st.sidebar:
+    st.markdown(
+        '<div style="font-weight:800;font-size:20px;letter-spacing:-.02em;'
+        f'color:{INK}">TELLTAIL</div>'
+        '<div class="tt-quiet" style="margin:-2px 0 10px">'
+        'canine telemetry · Snowflake</div>', unsafe_allow_html=True)
+    _choice = st.radio(
+        "section", [p[0] for p in PAGES], label_visibility="collapsed",
+        format_func=lambda n: n)
+    _meta = next(p for p in PAGES if p[0] == _choice)
+    st.markdown(
+        f'<div class="tt-railnote" style="border-left:3px solid {_meta[2]}">'
+        f'<b>{_meta[0]}</b><br><span class="tt-quiet">{_meta[1]}</span></div>',
+        unsafe_allow_html=True)
+
+PAGE, PAGE_SUB, PAGE_HUE = _meta
+
+st.markdown(
+    f'<div class="tt-pagehead" style="border-left:4px solid {PAGE_HUE}">'
+    f'<span class="tt-pagetitle">{PAGE}</span>'
+    f'<span class="tt-quiet"> — {PAGE_SUB}</span></div>',
+    unsafe_allow_html=True)
 
 
 # ===========================================================================
 # TAB 1 — THE PACK.  The ward round.
 # ===========================================================================
-with TABS[0]:
+def _page_0():
     pack = rows("""
         SELECT p.*, t.triage_label, t.severity AS triage_severity, f.n_findings
         FROM MARTS.PACK_STATUS p
@@ -360,47 +570,45 @@ with TABS[0]:
                 colour = TRIAGE_COLOUR.get(sev, "#A8A29E")
                 label = d.get("TRIAGE_LABEL") or "not triaged"
                 state = d.get("CURRENT_STATE") or "—"
+                stale_s = d.get("SECONDS_SINCE_LAST_EPOCH")
+                # Past a week this is not lag, it is the 2018 bulk corpus. Say
+                # which, rather than printing "stale 17,715,743s" and hoping.
+                live = stale_s is not None and float(stale_s) < 604800
+                freshness = (f'<span style="color:{ACCENT}">&#9679;</span> {ago(stale_s)} ago'
+                             if live else '<span style="opacity:.55">&#9675;</span> corpus')
+                spark = sparkline_svg(by_dog.get(d["DOG_ID"]) or [],
+                                      colour=ACCENT if live else "#C9C4BE")
                 with c:
                     st.markdown(f"""
-<div class="tt-card">
-  <div style="display:flex;justify-content:space-between;align-items:baseline">
-    <div><b style="font-size:15px">Dog {d['DOG_ID']}</b>
-      <span class="tt-quiet"> {d.get('BREED') or 'unknown breed'}</span></div>
+<div class="tt-card tt-dogcard">
+  <div class="tt-dogcard-head">
+    <div class="tt-dogcard-name">
+      <b>Dog {d['DOG_ID']}</b>
+      <span class="tt-quiet tt-breed">{d.get('BREED') or 'unknown breed'}</span>
+    </div>
     <span class="tt-badge" style="background:{colour}">{label}</span>
   </div>
-  <div class="tt-quiet" style="margin:2px 0 6px">
+  <div class="tt-quiet" style="margin:1px 0 5px">
     {fmt(d.get('AGE_YEARS'),1)}y · {fmt(d.get('WEIGHT_KG'),1)}kg · {d.get('COHORT_ID') or '—'}
   </div>
-  <div>
+  <div class="tt-chiprow">
     <span class="tt-chip" style="background:{palette.get(state,'#eee')}20;
           border-color:{palette.get(state,BORDER)}">{state}</span>
-    <span class="tt-chip" style="margin-left:4px">z<sub>self</sub> {fmt(d.get('Z_SELF'))}</span>
-    <span class="tt-chip" style="margin-left:4px">{fmt(d.get('N_FINDINGS') or 0,0)} findings</span>
+    <span class="tt-chip">z<sub>self</sub> {fmt(d.get('Z_SELF'))}</span>
+    <span class="tt-chip">{fmt(d.get('N_FINDINGS') or 0,0)} findings</span>
   </div>
-  <div class="tt-quiet" style="margin-top:6px">
+  <div class="tt-spark">{spark}</div>
+  <div class="tt-quiet tt-dogcard-foot">
     {fmt(d.get('EPOCHS_TOTAL') or 0,0)} epochs ·
-    {fmt(d.get('PCT_HEURISTIC') or 0,1)}% heuristic ·
-    stale {fmt(d.get('SECONDS_SINCE_LAST_EPOCH') or 0,0)}s
+    {fmt(d.get('PCT_HEURISTIC') or 0,1)}% heuristic · {freshness}
   </div>
 </div>""", unsafe_allow_html=True)
-                    series = by_dog.get(d["DOG_ID"]) or []
-                    if PLOTLY and len(series) > 2:
-                        fig = go.Figure(go.Scatter(
-                            y=[float(x) for x in series], mode="lines",
-                            line=dict(color=ACCENT, width=1.2), hoverinfo="skip"))
-                        fig.update_layout(height=42, margin=dict(l=0, r=0, t=0, b=0),
-                                          paper_bgcolor=CARD, plot_bgcolor=CARD,
-                                          showlegend=False,
-                                          xaxis=dict(visible=False),
-                                          yaxis=dict(visible=False))
-                        st.plotly_chart(fig, use_container_width=True,
-                                        config={"displayModeBar": False})
 
 
 # ===========================================================================
 # TAB 2 — LIVE COLLAR.  Kills the "is it real" objection.
 # ===========================================================================
-with TABS[1]:
+def _page_1():
     st.markdown("#### Live collar")
     st.markdown('<span class="tt-quiet">Raw 100 Hz dual-sensor waveform, the '
                 'features derived from it, and the state each second was '
@@ -438,6 +646,31 @@ with TABS[1]:
             ("micro-batches",            fmt(one(ing, "BATCHES", 0), 0)),
             ("latest sample",            str(one(ing, "LATEST") or "—")[:19]),
         ])
+
+        # The diagram the rest of this tab is evidence for. Drawn, not
+        # photographed: SiS blocks outbound requests, so an <img> to any CDN
+        # renders broken — and the useful picture is sensor PLACEMENT anyway.
+        with st.expander("Where the two sensors sit, and why their correlation is the feature",
+                         expanded=True):
+            a1, a2 = st.columns([3, 2])
+            with a1:
+                st.markdown(sensor_anatomy_svg(), unsafe_allow_html=True)
+            with a2:
+                st.markdown(
+                    '<div class="tt-card" style="font-size:13px;line-height:1.55">'
+                    '<b>Two sensors, one question.</b><br>'
+                    'A collar alone cannot tell a dog walking from a dog shaking '
+                    'its head — both are vigorous neck motion. The back harness '
+                    'resolves it: in <i>locomotion</i> the two sensors rise and '
+                    'fall together, so their correlation is high. In a head '
+                    'shake or a scratch the neck moves and the back does not, so '
+                    'it collapses toward zero.<br><br>'
+                    '<span class="tt-quiet">That single number, '
+                    '<code>CORR(vm_neck, vm_back)</code> over a one-second epoch, '
+                    'is computed in Snowflake and is what the ethogram states '
+                    'are built on. The chart below it is the raw 100 Hz signal '
+                    'the correlation is taken over.</span></div>',
+                    unsafe_allow_html=True)
 
         wave = rows(f"""
             SELECT sample_ts,
@@ -544,7 +777,7 @@ with TABS[1]:
 # ===========================================================================
 # TAB 3 — ETHOGRAM.  The behavioural fingerprint of one dog.
 # ===========================================================================
-with TABS[2]:
+def _page_2():
     st.markdown("#### Ethogram")
     dogs = rows("SELECT DISTINCT dog_id FROM MARTS.EPOCH_STATES ORDER BY dog_id")
     if not dogs:
@@ -652,7 +885,7 @@ with TABS[2]:
 # ===========================================================================
 # TAB 4 — SYNDROMES.  THE MONEY TAB.
 # ===========================================================================
-with TABS[3]:
+def _page_3():
     st.markdown("#### Syndromes")
     st.markdown(
         '<span class="tt-quiet">A threshold cannot detect a syndrome. A vet '
@@ -865,7 +1098,7 @@ with TABS[3]:
 # ===========================================================================
 # TAB 5 — BASELINES.  Every dog is its own control.
 # ===========================================================================
-with TABS[4]:
+def _page_4():
     st.markdown("#### Baselines")
     st.markdown('<span class="tt-quiet">A Husky doing forty minutes of galloping '
                 'is a Tuesday. A twelve-year-old Bulldog doing the same is an '
@@ -982,7 +1215,7 @@ with TABS[4]:
 # ===========================================================================
 # TAB 6 — VET NOTE.  A clinical document, not a chat bubble.
 # ===========================================================================
-with TABS[5]:
+def _page_5():
     st.markdown("#### Veterinary handoff note")
     notes = rows("""
         SELECT * FROM AI.V_VET_NOTE_FULL
@@ -1068,7 +1301,7 @@ with TABS[5]:
 # ===========================================================================
 # TAB 7 — DRIVERS.  What explains it.
 # ===========================================================================
-with TABS[6]:
+def _page_6():
     st.markdown("#### Drivers")
     ms = rows("SELECT * FROM ML.MODEL_SUMMARY")
     if ms:
@@ -1227,7 +1460,7 @@ with TABS[6]:
 # ===========================================================================
 # TAB 8 — SHELTER REALITY.  Allowed to be quiet.
 # ===========================================================================
-with TABS[7]:
+def _page_7():
     st.markdown("#### Shelter reality")
     punch = rows("SELECT * FROM REF.V_SHELTER_PUNCHLINE ORDER BY syndrome_code")
     intake = rows("""
@@ -1324,7 +1557,7 @@ warehouse noticed on day two.</b>
 # ===========================================================================
 # TAB 9 — PIPELINE.  How it was built.
 # ===========================================================================
-with TABS[8]:
+def _page_8():
     st.markdown("#### Pipeline")
     if stats:
         s = stats[0]

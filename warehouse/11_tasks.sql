@@ -157,6 +157,15 @@ CREATE OR REPLACE TASK MARTS.T_BRIEF
 AS
     CALL AI.SP_GENERATE_PACK_BRIEF();
 
+-- The DAG records its own health. Runs last so the snapshot it writes describes
+-- the run that just finished rather than the one before it.
+CREATE OR REPLACE TASK MARTS.T_OBSERVE
+    WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
+    COMMENT   = 'Snapshot DAG lag and task history into tables Streamlit can read.'
+    AFTER     MARTS.T_MATCH_ROWS
+AS
+    CALL MARTS.SP_SNAPSHOT_OBSERVABILITY();
+
 CREATE OR REPLACE TASK MARTS.T_ATTEST
     WAREHOUSE = ${SNOWFLAKE_WAREHOUSE}
     COMMENT   = 'Stage findings for the bridge. Snowflake queues; it never signs.'
@@ -169,6 +178,7 @@ AS
 -- suspended, and resuming the root first would fire a run against a DAG that
 -- is only half awake.
 -- ---------------------------------------------------------------------------
+ALTER TASK MARTS.T_OBSERVE   RESUME;
 ALTER TASK MARTS.T_ATTEST    RESUME;
 ALTER TASK MARTS.T_BRIEF         RESUME;
 ALTER TASK MARTS.T_TRIAGE        RESUME;
@@ -186,40 +196,112 @@ ALTER TASK MARTS.T_ROOT       RESUME;
 -- Pipeline observability. Tab 9 reads these four views and nothing else.
 -- ---------------------------------------------------------------------------
 
--- Live refresh lag per Dynamic Table node. This is the proof that the
--- architecture diagram is what Snowflake actually runs.
+-- SNAPSHOTTED, NOT QUERIED LIVE.
+--
+-- Streamlit in Snowflake executes every query inside an owner's-rights stored
+-- procedure, and the INFORMATION_SCHEMA table functions these two views are
+-- built on refuse to run there:
+--
+--   090234 (42601): Stored procedure execution error: Requested information on
+--   the current user is not accessible in stored procedure.
+--
+-- The functions themselves are fine — a normal stored procedure calls
+-- DYNAMIC_TABLES() happily, which is how the snapshot below works. It is the
+-- SiS caller context specifically that has no current user to resolve. So the
+-- DAG writes its own observability down on a schedule and the dashboard reads
+-- plain tables, which also means tab 9 states WHEN it was captured instead of
+-- implying it is live.
+CREATE TABLE IF NOT EXISTS MARTS.DAG_LAG_SNAPSHOT (
+    object_name           STRING,
+    schema_name           STRING,
+    target_lag_sec        FLOAT,
+    maximum_lag_sec       FLOAT,
+    mean_lag_sec          FLOAT,
+    latest_data_timestamp TIMESTAMP_LTZ,
+    state                 STRING,
+    reason                STRING,
+    captured_at           TIMESTAMP_NTZ
+);
+
+CREATE TABLE IF NOT EXISTS MARTS.TASK_HISTORY_SNAPSHOT (
+    task_name      STRING,
+    database_name  STRING,
+    schema_name    STRING,
+    state          STRING,
+    scheduled_time TIMESTAMP_LTZ,
+    completed_time TIMESTAMP_LTZ,
+    duration_ms    NUMBER,
+    return_value   STRING,
+    error_message  STRING,
+    captured_at    TIMESTAMP_NTZ
+);
+
+CREATE OR REPLACE PROCEDURE MARTS.SP_SNAPSHOT_OBSERVABILITY()
+RETURNS STRING
+LANGUAGE SQL
+AS
+$$
+DECLARE
+    n_dt   NUMBER DEFAULT 0;
+    n_task NUMBER DEFAULT 0;
+BEGIN
+    CREATE OR REPLACE TEMPORARY TABLE dag_now AS
+    SELECT
+        name                                    AS object_name,
+        schema_name,
+        target_lag_sec,
+        maximum_lag_sec,
+        mean_lag_sec,
+        latest_data_timestamp,
+        scheduling_state:state::STRING          AS state,
+        scheduling_state:reason_message::STRING AS reason,
+        CURRENT_TIMESTAMP()::TIMESTAMP_NTZ      AS captured_at
+    -- DYNAMIC_TABLES(), not DYNAMIC_TABLE_REFRESH_HISTORY(). The lag columns
+    -- this is entirely about — maximum_lag_sec, mean_lag_sec,
+    -- latest_data_timestamp, scheduling_state — exist only on the former, which
+    -- returns one row per dynamic table. The history function reports one row
+    -- per REFRESH and carries target_lag_sec but none of the rest.
+    FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES());
+
+    DELETE FROM MARTS.DAG_LAG_SNAPSHOT;
+    INSERT INTO MARTS.DAG_LAG_SNAPSHOT SELECT * FROM dag_now;
+    n_dt := (SELECT COUNT(*) FROM MARTS.DAG_LAG_SNAPSHOT);
+
+    CREATE OR REPLACE TEMPORARY TABLE task_now AS
+    SELECT
+        name          AS task_name,
+        database_name,
+        schema_name,
+        state,
+        scheduled_time,
+        completed_time,
+        DATEDIFF('millisecond', query_start_time, completed_time) AS duration_ms,
+        return_value,
+        error_message,
+        CURRENT_TIMESTAMP()::TIMESTAMP_NTZ AS captured_at
+    FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY(
+        SCHEDULED_TIME_RANGE_START => DATEADD('hour', -24, CURRENT_TIMESTAMP()),
+        RESULT_LIMIT => 500
+    ));
+
+    DELETE FROM MARTS.TASK_HISTORY_SNAPSHOT;
+    INSERT INTO MARTS.TASK_HISTORY_SNAPSHOT SELECT * FROM task_now;
+    n_task := (SELECT COUNT(*) FROM MARTS.TASK_HISTORY_SNAPSHOT);
+
+    RETURN 'observability: ' || :n_dt || ' dynamic tables, '
+        || :n_task || ' task runs';
+END;
+$$;
+
 CREATE OR REPLACE VIEW MARTS.V_DAG_LAG AS
-SELECT
-    name                                    AS object_name,
-    schema_name,
-    target_lag_sec,
-    maximum_lag_sec,
-    mean_lag_sec,
-    latest_data_timestamp,
-    scheduling_state:state::STRING          AS state,
-    scheduling_state:reason_message::STRING AS reason
--- DYNAMIC_TABLES(), not DYNAMIC_TABLE_REFRESH_HISTORY(). The lag columns this
--- view is entirely about — maximum_lag_sec, mean_lag_sec, latest_data_timestamp,
--- scheduling_state — live only on the former, which already returns one row per
--- dynamic table. The history function reports one row per REFRESH and carries
--- target_lag_sec but none of the rest.
-FROM TABLE(INFORMATION_SCHEMA.DYNAMIC_TABLES());
+SELECT object_name, schema_name, target_lag_sec, maximum_lag_sec, mean_lag_sec,
+       latest_data_timestamp, state, reason, captured_at
+FROM MARTS.DAG_LAG_SNAPSHOT;
 
 CREATE OR REPLACE VIEW MARTS.V_TASK_HISTORY AS
-SELECT
-    name                AS task_name,
-    database_name,
-    schema_name,
-    state,
-    scheduled_time,
-    completed_time,
-    DATEDIFF('millisecond', query_start_time, completed_time) AS duration_ms,
-    return_value,
-    error_message
-FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY(
-    SCHEDULED_TIME_RANGE_START => DATEADD('hour', -24, CURRENT_TIMESTAMP()),
-    RESULT_LIMIT => 500
-));
+SELECT task_name, database_name, schema_name, state, scheduled_time,
+       completed_time, duration_ms, return_value, error_message, captured_at
+FROM MARTS.TASK_HISTORY_SNAPSHOT;
 
 -- Credit burn to date. Doubles as the cost guard.
 CREATE OR REPLACE VIEW MARTS.V_CREDIT_BURN AS

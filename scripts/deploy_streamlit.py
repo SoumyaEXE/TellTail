@@ -50,6 +50,18 @@ def main() -> int:
         die(f"{envyml} not found. Streamlit in Snowflake needs it next to the app "
             f"or plotly will ModuleNotFoundError in SiS only.")
 
+    # A `python=` pin in environment.yml deploys cleanly and then fails the app
+    # at load with 'Packages not found: python==3.11' — a blank error page, no
+    # traceback, and nothing wrong with the app itself. SiS resolves this file
+    # against the `snowflake` Anaconda channel, which has no package named
+    # `python`; the interpreter version belongs to the STREAMLIT object.
+    for i, line in enumerate(envyml.read_text(encoding="utf-8").splitlines(), 1):
+        bare = line.split("#", 1)[0].strip().lstrip("-").strip()
+        if bare.replace(" ", "").startswith(("python=", "python>", "python<")):
+            die(f"{envyml}:{i} pins the interpreter: {line.strip()!r}. "
+                f"Remove it. SiS has no `python` package to resolve, so the "
+                f"app will load to 'Packages not found' instead of rendering.")
+
     db = env("SNOWFLAKE_DATABASE", "TELLTAIL")
     wh = env("SNOWFLAKE_WAREHOUSE", "TELLTAIL_WH")
     conn = connect()
