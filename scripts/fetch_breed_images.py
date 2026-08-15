@@ -109,11 +109,18 @@ def auth_headers() -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-def rng(requests, headers: dict, start: int, end: int) -> bytes:
-    """Fetch bytes [start, end] inclusive."""
+def rng(session, headers: dict, start: int, end: int) -> bytes:
+    """Fetch bytes [start, end] inclusive.
+
+    Takes a requests.Session, not the module. Every range is a fresh redirect
+    from kaggle.com to storage plus a TLS handshake; on a bare requests.get
+    that is the whole cost of the fetch — thirty-odd round trips took minutes
+    while the bytes themselves took seconds. One pooled connection makes the
+    same work take about as long as the transfer deserves.
+    """
     h = dict(headers)
     h["Range"] = f"bytes={start}-{end}"
-    r = requests.get(URL, headers=h, stream=True, allow_redirects=True, timeout=180)
+    r = session.get(URL, headers=h, stream=True, allow_redirects=True, timeout=180)
     if r.status_code not in (200, 206):
         r.close()
         die(f"range request returned {r.status_code}; the mirror may have changed")
@@ -122,15 +129,15 @@ def rng(requests, headers: dict, start: int, end: int) -> bytes:
     return data
 
 
-def central_directory(requests, headers: dict, total: int) -> list[tuple[str, int, int, int, int]]:
+def central_directory(session, headers: dict, total: int) -> list[tuple[str, int, int, int, int]]:
     """(name, local_header_offset, compressed_size, uncompressed_size, method)."""
-    tail = rng(requests, headers, max(0, total - 65_536), total - 1)
+    tail = rng(session, headers, max(0, total - 65_536), total - 1)
     i = tail.rfind(b"PK\x05\x06")
     if i < 0:
         die("no End of Central Directory record; the archive is not a plain ZIP")
     n_entries, cd_size, cd_off = struct.unpack("<HII", tail[i + 10:i + 20])
 
-    cd = rng(requests, headers, cd_off, cd_off + cd_size - 1)
+    cd = rng(session, headers, cd_off, cd_off + cd_size - 1)
     out, p = [], 0
     while p < len(cd) - 4 and cd[p:p + 4] == b"PK\x01\x02":
         method = struct.unpack("<H", cd[p + 10:p + 12])[0]
@@ -144,15 +151,15 @@ def central_directory(requests, headers: dict, total: int) -> list[tuple[str, in
     return out
 
 
-def extract(requests, headers: dict, entry) -> bytes:
+def extract(session, headers: dict, entry) -> bytes:
     """Range-read one member and decompress it."""
     name, lho, csize, usize, method = entry
-    head = rng(requests, headers, lho, lho + 29)
+    head = rng(session, headers, lho, lho + 29)
     if head[:4] != b"PK\x03\x04":
         die(f"bad local header for {name}")
     nlen, elen = struct.unpack("<HH", head[26:30])
     start = lho + 30 + nlen + elen
-    blob = rng(requests, headers, start, start + csize - 1)
+    blob = rng(session, headers, start, start + csize - 1)
     if method == 0:
         return blob
     if method == 8:
@@ -190,7 +197,8 @@ def main() -> int:
     headers = auth_headers()
 
     header("Locating the archive")
-    probe = requests.get(URL, headers=headers, stream=True,
+    session = requests.Session()
+    probe = session.get(URL, headers=headers, stream=True,
                          allow_redirects=True, timeout=120)
     total = int(probe.headers.get("Content-Length", 0))
     status, accepts = probe.status_code, probe.headers.get("Accept-Ranges")
@@ -203,7 +211,7 @@ def main() -> int:
     ok(f"{total / 1e6:.0f} MB, ranges accepted — reading the index only")
 
     header("Reading the ZIP index")
-    entries = central_directory(requests, headers, total)
+    entries = central_directory(session, headers, total)
 
     # one image per wanted folder, first alphabetically so reruns are stable
     wanted = {v: None for v in BREED_MATCH.values()}
@@ -225,7 +233,7 @@ def main() -> int:
     blobs: dict[str, str] = {}
     for frag, e in sorted(found.items()):
         try:
-            raw = extract(requests, headers, e)
+            raw = extract(session, headers, e)
             small = thumbnail(raw, args.size)
             blobs[frag] = base64.b64encode(small).decode("ascii")
             print(f"  {G['ok']} {frag:<28} {len(raw) / 1024:6.0f} KB "
