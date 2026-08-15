@@ -141,6 +141,20 @@ def bars(n: int, *, row: int = 24) -> int:
     return max(H_SM, min(560, row * int(n or 0) + 76))
 
 
+def alpha(hex_colour: str, a: float) -> str:
+    """#RRGGBB + opacity -> rgba(). Plotly will not take an 8-digit hex.
+
+    CSS has accepted #RRGGBBAA for years, so writing `S_ORANGE + "33"` looks
+    right and works everywhere in this file EXCEPT inside a figure, where
+    plotly rejects it at construction with a property error. Converting here
+    means the fill tints in charts and the tints in the stylesheet can be
+    written from the same constants.
+    """
+    h = hex_colour.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{a})"
+
+
 st.set_page_config(page_title="TELLTAIL", page_icon="🐕", layout="wide")
 
 st.markdown(f"""
@@ -686,8 +700,11 @@ def symbol_ribbon(code, dog_id, test_num, match_id, *, height=H_RIBBON):
         for r in mrows:
             fig.add_trace(go.Bar(
                 x=[1], y=["match"], orientation="h",
-                marker=dict(color=cmap[r["SYMBOL"]], line=dict(width=0)),
-                text=[f'{r["SYMBOL"]} — state {r["STATE"]}<br>{r["EPOCH_TS"]}'],
+                # a hairline of surface between segments, so a run of six
+                # identical symbols reads as six seconds and not one block
+                marker=dict(color=cmap[r["SYMBOL"]],
+                            line=dict(width=1, color=CARD)),
+                hovertext=[f'{r["SYMBOL"]} — state {r["STATE"]}<br>{r["EPOCH_TS"]}'],
                 hoverinfo="text", showlegend=False))
         fig.update_layout(
             barmode="stack",
@@ -1134,7 +1151,7 @@ def _page_0():
                     x=[n], y=["pack"], orientation="h",
                     marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E"),
                                 line=dict(width=0)),
-                    text=[f"{lbl}: {n} dogs"], hoverinfo="text", showlegend=False))
+                    hovertext=[f"{lbl}: {n} dogs"], hoverinfo="text", showlegend=False))
             fig.update_layout(barmode="stack",
                               xaxis=dict(visible=False), yaxis=dict(visible=False))
             chart(clean_axes(fig), H_STRIP)
@@ -1325,7 +1342,7 @@ def _page_1():
                     unsafe_allow_html=True)
 
         wave = rows(f"""
-            SELECT sample_ts,
+            SELECT sample_ts, neck_ax, neck_ay, neck_az,
                    SQRT(neck_ax*neck_ax + neck_ay*neck_ay + neck_az*neck_az) AS vm_neck,
                    SQRT(back_ax*back_ax + back_ay*back_ay + back_az*back_az) AS vm_back,
                    is_synthetic
@@ -1340,15 +1357,15 @@ def _page_1():
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=xs, y=[float(r["VM_NECK"] or 0) for r in wave],
                                      mode="lines", name="neck",
-                                     line=dict(color=ACCENT, width=1),
+                                     line=dict(color=S_ORANGE, width=1),
                                      hoverinfo="skip"))
             fig.add_trace(go.Scatter(x=xs, y=[float(r["VM_BACK"] or 0) for r in wave],
                                      mode="lines", name="back",
-                                     line=dict(color="#0369A1", width=1),
+                                     line=dict(color=S_BLUE, width=1),
                                      hoverinfo="skip"))
             fig.update_layout(title=f"1 · raw 100 Hz vector magnitude — "
-                                    f"<span style='color:{ACCENT}'>neck collar</span> vs "
-                                    f"<span style='color:#0369A1'>back harness</span>",
+                                    f"<span style='color:{S_ORANGE}'>neck collar</span> vs "
+                                    f"<span style='color:{S_BLUE}'>back harness</span>",
                               title_font_size=12)
             chart(clean_axes(fig, y_zero_line=False), H_SM)
             if any(r.get("IS_SYNTHETIC") for r in wave):
@@ -1369,31 +1386,95 @@ def _page_1():
                     (SELECT MAX(epoch_ts) FROM STAGING.EPOCH_FEATURES WHERE dog_id = {dog}))
             ORDER BY e.epoch_ts
         """)
+        # TWO CHARTS, NOT ONE WITH TWO Y-AXES.
+        #
+        # This was a dual-axis plot: vector magnitude in g on the left, the
+        # neck/back correlation on a right axis pinned to [-1, 1]. A second
+        # y-scale lets the author decide, by choosing the ranges, whether two
+        # lines appear to move together — the crossings are an artefact of the
+        # scaling, not of the data, and this app's entire argument rests on
+        # exactly that relationship. Stacked and time-aligned, the reader can
+        # still compare them, but nothing is being implied by overlay.
         if PLOTLY and feat:
             xs = [str(r["EPOCH_TS"]) for r in feat]
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=xs, y=[float(r["VM_NECK_MEAN"] or 0) for r in feat],
-                                     mode="lines", line=dict(color=INK, width=1.4),
+                                     mode="lines", line=dict(color=INK, width=1.6),
                                      name="vm mean", hoverinfo="skip"))
             fig.add_trace(go.Scatter(x=xs, y=[float(r["VM_NECK_STD"] or 0) for r in feat],
-                                     mode="lines", line=dict(color=INK_2, width=1,
+                                     mode="lines", line=dict(color=INK_2, width=1.2,
                                                              dash="dot"),
                                      name="vm sd", hoverinfo="skip"))
+            fig.update_layout(
+                title="2 · derived epoch features — neck vector magnitude, "
+                      "mean (solid) and standard deviation (dotted), in g",
+                title_font_size=12)
+            chart(clean_axes(fig, y_zero_line=False), H_SM)
+
+            fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=xs, y=[float(r["NECK_BACK_CORR"] or 0) for r in feat],
-                mode="lines", yaxis="y2", line=dict(color=ACCENT, width=1.6),
-                name="corr",
-                text=[f"corr {fmt(r['NECK_BACK_CORR'])}<br>{r.get('STATE')}" for r in feat],
+                mode="lines", line=dict(color=S_ORANGE, width=1.8), name="corr",
+                text=[f"corr {fmt(r['NECK_BACK_CORR'])}<br>{r.get('STATE')}"
+                      for r in feat],
                 hoverinfo="text"))
+            fig.add_hline(y=0, line=dict(color=BORDER, width=1))
             fig.update_layout(
-                title="2 · derived epoch features — "
-                      f"<span style='color:{ACCENT}'>neck/back correlation</span> "
-                      "on the right axis, pinned to [-1, 1]",
+                title="3 · the feature the states are built on — "
+                      "CORR(vm_neck, vm_back) over the same seconds, [-1, 1]",
                 title_font_size=12,
-                yaxis2=dict(overlaying="y", side="right", range=[-1, 1],
-                            showgrid=False, zeroline=True, zerolinecolor=BORDER,
-                            linecolor=BORDER, tickfont=dict(color=ACCENT)))
+                yaxis=dict(range=[-1.05, 1.05]))
             chart(clean_axes(fig, y_zero_line=False), H_SM)
+
+        # ------------------------------------------------------------------
+        # THE SAME SECONDS AS A SHAPE IN SPACE.
+        #
+        # Three traces of ax/ay/az stacked on a time axis is three wiggly lines
+        # that all look alike. The accelerometer is measuring a 3-vector, and
+        # plotted as one it stops being a signal and becomes a MOTION SIGNATURE
+        # you can recognise on sight: a resting dog is a dense knot around the
+        # 1g gravity vector, a walking dog is a closed loop repeated once per
+        # stride, and a head shake is a flat high-amplitude smear along one
+        # axis. That is a genuinely 3D fact and it flattens badly — which is
+        # the only good reason to spend a 3D plot on anything.
+        # ------------------------------------------------------------------
+        if PLOTLY and wave and len(wave) > 30:
+            st.markdown("**The motion signature, in the three axes the collar "
+                        "actually measures**")
+            st.markdown('<span class="tt-quiet">Drag to rotate. One point per '
+                        '100 Hz sample, the line is time. Stillness knots around '
+                        'the gravity vector; a gait draws a repeating loop; a '
+                        'head shake smears along one axis.</span>',
+                        unsafe_allow_html=True)
+            ax = [float(r["NECK_AX"] or 0) for r in wave]
+            ay = [float(r["NECK_AY"] or 0) for r in wave]
+            az = [float(r["NECK_AZ"] or 0) for r in wave]
+            fig = go.Figure(go.Scatter3d(
+                x=ax, y=ay, z=az, mode="lines+markers",
+                # the path is the thread, the markers carry TIME along it —
+                # a 2px opaque line drawn over its own markers hides the one
+                # channel that says which way round the loop the dog went
+                line=dict(color=alpha(S_ORANGE, 0.35), width=1),
+                marker=dict(size=2.2, color=list(range(len(ax))),
+                            colorscale=[[0, "#cde2fb"], [1, "#0d366b"]],
+                            opacity=0.9),
+                hovertemplate=("ax %{x:.2f} g<br>ay %{y:.2f} g"
+                               "<br>az %{z:.2f} g<extra></extra>")))
+            fig.update_layout(
+                scene=dict(
+                    xaxis=dict(title="neck ax (g)", backgroundcolor=CARD,
+                               gridcolor=BORDER, zerolinecolor=BORDER),
+                    yaxis=dict(title="neck ay (g)", backgroundcolor=CARD,
+                               gridcolor=BORDER, zerolinecolor=BORDER),
+                    zaxis=dict(title="neck az (g)", backgroundcolor=CARD,
+                               gridcolor=BORDER, zerolinecolor=BORDER),
+                    camera=dict(eye=dict(x=1.5, y=1.5, z=0.9))),
+                paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=False,
+                margin=dict(l=0, r=0, t=4, b=0), height=H_LG,
+                font=dict(family="Geist, Inter, sans-serif", size=11,
+                          color=INK_2))
+            st.plotly_chart(fig, use_container_width=True,
+                            config={"displayModeBar": False})
 
         # State ribbon, drawn from contiguous runs rather than one bar per epoch.
         if PLOTLY and feat:
@@ -1411,10 +1492,10 @@ def _page_1():
                     x=[n], y=["state"], orientation="h",
                     marker=dict(color=palette.get(s, "#D6D3D1"),
                                 line=dict(width=0)),
-                    text=[f"{s} · {n}s · from {t0} · source {src}"],
+                    hovertext=[f"{s} · {n}s · from {t0} · source {src}"],
                     hoverinfo="text", showlegend=False))
             fig.update_layout(barmode="stack",
-                              title="3 · classified state, one block per second",
+                              title="4 · classified state, one block per second",
                               title_font_size=12,
                               xaxis=dict(visible=False), yaxis=dict(visible=False))
             chart(clean_axes(fig), H_RIBBON)
@@ -1477,18 +1558,47 @@ def _page_2():
             ("transitions seen", fmt(len(tr), 0)),
         ])
         if PLOTLY and bouts:
-            fig = go.Figure()
+            # ONE TRACE PER STATE, NOT ONE PER BOUT.
+            #
+            # This drew 518 separate single-bar traces stacked end to end. Every
+            # trace carries its own 1px antialiased edge, so at 96px tall the
+            # ribbon rendered as vertical static — you could not read a single
+            # bout out of it, and it was the loudest thing on the page. Grouping
+            # by state and using base= to place each run on a shared axis gives
+            # at most fourteen traces, contiguous fills, and the same data.
+            spans: dict = {}
+            cursor = 0
             for b in bouts:
+                secs = int(b["BOUT_SECONDS"] or 0)
+                s = b["STATE"]
+                spans.setdefault(s, {"x": [], "base": [], "t": []})
+                spans[s]["x"].append(secs)
+                spans[s]["base"].append(cursor)
+                spans[s]["t"].append(f'{s} · {secs}s · from {b["BOUT_START"]}')
+                cursor += secs
+            fig = go.Figure()
+            for s, d in spans.items():
                 fig.add_trace(go.Bar(
-                    x=[int(b["BOUT_SECONDS"])], y=["day"], orientation="h",
-                    marker=dict(color=palette.get(b["STATE"], "#D6D3D1"),
+                    x=d["x"], base=d["base"], y=["session"] * len(d["x"]),
+                    orientation="h",
+                    marker=dict(color=palette.get(s, "#D6D3D1"),
                                 line=dict(width=0)),
-                    text=[f'{b["STATE"]} · {int(b["BOUT_SECONDS"])}s · {b["BOUT_START"]}'],
-                    hoverinfo="text", showlegend=False))
-            fig.update_layout(barmode="stack", title="State ribbon, full session",
-                              title_font_size=12,
-                              xaxis=dict(visible=False), yaxis=dict(visible=False))
+                    hovertext=d["t"], hoverinfo="text", showlegend=False))
+            fig.update_layout(
+                barmode="overlay",
+                title=f"State ribbon — {len(bouts):,} bouts over "
+                      f"{cursor / 3600:.1f} hours of recording, in order",
+                title_font_size=12,
+                bargap=0,
+                xaxis=dict(visible=False), yaxis=dict(visible=False))
             chart(clean_axes(fig), H_RIBBON)
+            legend = " ".join(
+                f'<span class="tt-chip" style="background:'
+                f'{palette.get(e["STATE"], "#D6D3D1")}2e;border-color:'
+                f'{palette.get(e["STATE"], "#D6D3D1")}">{e["STATE"]}</span>'
+                for e in ethogram() if e["STATE"] in spans)
+            st.markdown(f'<div style="margin-top:-4px">{legend}</div>',
+                        unsafe_allow_html=True)
 
         c1, c2 = st.columns(2)
 
@@ -1509,7 +1619,7 @@ def _page_2():
                                  f'p = {fmt(r["PROB"],3)}<br>n = {fmt(r["N"],0)}')
                 fig = go.Figure(go.Heatmap(
                     z=z, x=states, y=states, text=txt, hoverinfo="text",
-                    colorscale=[[0, "#FFFFFF"], [1, ACCENT]], showscale=False,
+                    colorscale=[[0, "#FFFFFF"], [1, S_BLUE]], showscale=False,
                     xgap=1, ygap=1))
                 fig.update_layout(title="p(next state | current state)",
                                   title_font_size=11)
@@ -1568,7 +1678,7 @@ def _page_2():
                     orientation="h",
                     marker=dict(color=[palette.get(r["TO_STATE"], "#D6D3D1")
                                        for r in moves][::-1]),
-                    text=[f'{r["FROM_STATE"]} → {r["TO_STATE"]}<br>'
+                    hovertext=[f'{r["FROM_STATE"]} → {r["TO_STATE"]}<br>'
                           f'p = {fmt(r["PROB"],3)}<br>{fmt(r["N"],0)} times'
                           for r in moves][::-1],
                     hoverinfo="text"))
@@ -1598,7 +1708,7 @@ def _page_2():
                     x=[float(r["MEDIAN_S"] or 0) for r in bl][::-1], y=names,
                     orientation="h",
                     marker=dict(color=[palette.get(n, "#D6D3D1") for n in names]),
-                    text=[f'{r["STATE"]}<br>median {fmt(r["MEDIAN_S"],0)}s'
+                    hovertext=[f'{r["STATE"]}<br>median {fmt(r["MEDIAN_S"],0)}s'
                           f'<br>mean {fmt(r["MEAN_S"],1)}s'
                           f'<br>longest {fmt(r["MAX_S"],0)}s'
                           f'<br>{fmt(r["BOUTS"],0)} bouts' for r in bl][::-1],
@@ -1712,6 +1822,60 @@ def _page_3():
                 legend=dict(orientation="h", y=-0.2, font=dict(size=10)),
                 yaxis=dict(title="dog id"))
             chart(clean_axes(fig, y_zero_line=False), H_MD)
+            st.markdown('<span class="tt-quiet">The band running bottom-left to '
+                        'top-right is not a trend — the bulk corpus was loaded '
+                        'dog by dog, so onset time and dog id increase together '
+                        'by construction. The live replayed dogs are the column '
+                        'on the right.</span>', unsafe_allow_html=True)
+
+            # ------------------------------------------------------------------
+            # THE SAME 98 FINDINGS IN THE SPACE THAT DEFINES THEM.
+            #
+            # A syndrome is not a point in time, it is a shape: how long it ran,
+            # how many epochs the pattern consumed, and how confidently. Those
+            # three are what MATCH_RECOGNIZE actually produced and they separate
+            # the codes from each other — S6 is short and dense, S3 is long and
+            # sparse. Any 2D pair of them puts two codes on top of one another.
+            # ------------------------------------------------------------------
+            st.markdown("**The findings in their own measure space**")
+            st.markdown('<span class="tt-quiet">Drag to rotate. Duration against '
+                        'epochs matched against confidence — the three numbers '
+                        'the pattern engine returns. Syndromes occupy different '
+                        'regions, which is the claim that they are different '
+                        'things rather than one detector fired six ways.</span>',
+                        unsafe_allow_html=True)
+            fig = go.Figure()
+            for c in codes:
+                pts = [f for f in finds if f["SYNDROME_CODE"] == c]
+                fig.add_trace(go.Scatter3d(
+                    x=[float(f["DURATION_S"] or 0) for f in pts],
+                    y=[float(f["N_EPOCHS"] or 0) for f in pts],
+                    z=[float(f["CONFIDENCE"] or 0) for f in pts],
+                    mode="markers", name=c,
+                    marker=dict(size=4, color=cmap[c], opacity=0.8,
+                                line=dict(width=0)),
+                    hovertext=[f'{c} · dog {int(f["DOG_ID"])}<br>'
+                               f'{fmt(f["DURATION_S"],0)}s over '
+                               f'{fmt(f["N_EPOCHS"],0)} epochs<br>'
+                               f'confidence {fmt(f["CONFIDENCE"],3)}'
+                               for f in pts],
+                    hoverinfo="text"))
+            fig.update_layout(
+                scene=dict(
+                    xaxis=dict(title="duration (s)", backgroundcolor=CARD,
+                               gridcolor=BORDER, zerolinecolor=BORDER),
+                    yaxis=dict(title="epochs matched", backgroundcolor=CARD,
+                               gridcolor=BORDER, zerolinecolor=BORDER),
+                    zaxis=dict(title="confidence", backgroundcolor=CARD,
+                               gridcolor=BORDER, zerolinecolor=BORDER),
+                    camera=dict(eye=dict(x=1.6, y=1.5, z=0.9))),
+                paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=True,
+                legend=dict(itemsizing="constant", font=dict(size=10)),
+                margin=dict(l=0, r=0, t=4, b=0), height=H_LG,
+                font=dict(family="Geist, Inter, sans-serif", size=11,
+                          color=INK_2))
+            st.plotly_chart(fig, use_container_width=True,
+                            config={"displayModeBar": False})
 
         dataframe(
             [{
@@ -1835,7 +1999,7 @@ def _page_3():
                     fig.add_trace(go.Bar(
                         x=codes, y=ys, name=b,
                         marker=dict(color=SYMBOL_COLOURS[i % len(SYMBOL_COLOURS)]),
-                        text=[f"{b}: {int(y)}" for y in ys], hoverinfo="text"))
+                        hovertext=[f"{b}: {int(y)}" for y in ys], hoverinfo="text"))
                 fig.update_layout(barmode="stack", showlegend=True,
                                   legend=dict(orientation="h", y=-0.15,
                                               font=dict(size=10)),
@@ -1891,7 +2055,7 @@ def _page_4():
                                      hoverinfo="skip", showlegend=False))
             fig.add_trace(go.Scatter(
                 x=xs, y=[float(r["ACTIVITY_INDEX"] or 0) for r in dev], mode="lines",
-                line=dict(color=ACCENT, width=1.5),
+                line=dict(color=S_ORANGE, width=1.5),
                 text=[f'{fmt(r["ACTIVITY_INDEX"],3)}<br>z_self {fmt(r["Z_SELF"],2)}'
                       f'{" · SYNTHETIC" if r.get("IS_SYNTHETIC") else ""}' for r in dev],
                 hoverinfo="text", showlegend=False))
@@ -1901,9 +2065,17 @@ def _page_4():
                 title_font_size=11)
             chart(clean_axes(fig, y_zero_line=False), H_MD)
 
+        # The left column used to be a five-row table and a three-row table
+        # against a full-height chart on the right — half the page ended 600px
+        # above the other half. The cohort comparison is a DISTRIBUTION
+        # question ("is this dog unusual for dogs like it"), and a distribution
+        # answered with two averages is the weakest possible form of it.
         c1, c2 = st.columns([1, 2])
         with c1:
             st.markdown("**Against its cohort**")
+            st.markdown('<span class="tt-quiet">Every dog in the same weight and '
+                        'age band, as a spread rather than an average. This dog '
+                        'is the amber box.</span>', unsafe_allow_html=True)
             summ = rows(f"""
                 SELECT ROUND(AVG(z_self),3) AS z_self, ROUND(AVG(z_cohort),3) AS z_cohort,
                        ROUND(AVG(activity_index),4) AS idx,
@@ -1911,6 +2083,55 @@ def _page_4():
                        ANY_VALUE(cohort_id) AS cohort
                 FROM MARTS.DOG_DEVIATION WHERE dog_id = {dog}
             """)
+            peers = rows(f"""
+                SELECT dog_id, activity_index
+                FROM MARTS.DOG_DEVIATION
+                WHERE activity_index IS NOT NULL
+                  AND cohort_id = (SELECT ANY_VALUE(cohort_id)
+                                   FROM MARTS.DOG_DEVIATION WHERE dog_id = {dog})
+                QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id
+                                           ORDER BY RANDOM()) <= 300
+            """)
+            # A cohort of one is a real outcome here — the bands are narrow and
+            # some dogs are the only animal in their weight/age cell. Drawing a
+            # single lonely box against no comparison looks like a broken chart
+            # rather than a fact, so widen to the whole pack and SAY SO instead
+            # of quietly implying this is the cohort.
+            alone = len({r["DOG_ID"] for r in peers}) < 3
+            if alone:
+                peers = rows("""
+                    SELECT dog_id, activity_index
+                    FROM MARTS.DOG_DEVIATION
+                    WHERE activity_index IS NOT NULL
+                    QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id
+                                               ORDER BY RANDOM()) <= 200
+                """)
+                st.markdown(
+                    '<div class="tt-caveat">This dog is the only one in its '
+                    'weight and age band, so there is no cohort to compare it '
+                    'against. Shown against <b>the whole pack</b> instead — a '
+                    'weaker comparison, and labelled as one.</div>',
+                    unsafe_allow_html=True)
+            if PLOTLY and peers:
+                by_dog: dict = {}
+                for r in peers:
+                    by_dog.setdefault(int(r["DOG_ID"]), []).append(
+                        float(r["ACTIVITY_INDEX"]))
+                fig = go.Figure()
+                for d in sorted(by_dog, key=lambda k: (k != dog, k)):
+                    mine = d == dog
+                    fig.add_trace(go.Box(
+                        x=by_dog[d], name=f"dog {d}", orientation="h",
+                        marker=dict(color=S_ORANGE if mine else "#D6D3D1"),
+                        line=dict(width=1.4), boxpoints=False,
+                        fillcolor=alpha(S_ORANGE, 0.22) if mine else "#F5F5F4",
+                        hoverinfo="x+name"))
+                fig.update_layout(
+                    title=("activity index, this dog against the whole pack"
+                           if alone else
+                           "activity index, this dog against its cohort"),
+                    title_font_size=11)
+                chart(clean_axes(fig, y_zero_line=False), bars(len(by_dog), row=18))
             if summ:
                 s = summ[0]
                 html_table([
@@ -1920,20 +2141,6 @@ def _page_4():
                     {"k": "z vs own baseline", "v": fmt(s["Z_SELF"], 3)},
                     {"k": "z vs cohort", "v": fmt(s["Z_COHORT"], 3)},
                 ], [("k", ""), ("v", "")])
-
-            st.markdown("**Trajectory**")
-            traj = rows(f"SELECT * FROM ML.V_TRAJECTORY WHERE dog_id = {dog}")
-            if traj and traj[0].get("PROJECTED_INDEX") is not None:
-                t = traj[0]
-                html_table([
-                    {"k": "current", "v": fmt(t["CURRENT_INDEX"], 4)},
-                    {"k": "projected", "v": fmt(t["PROJECTED_INDEX"], 4)},
-                    {"k": "change", "v": f'{fmt(t["PCT_CHANGE"],1)}%'},
-                ], [("k", ""), ("v", "")])
-            else:
-                st.markdown('<span class="tt-quiet">No forecast yet. ML.FORECAST '
-                            'needs ~100 training points; see ML.FUNCTION_STATUS.'
-                            '</span>', unsafe_allow_html=True)
 
         with c2:
             st.markdown("**The wall**")
@@ -1952,9 +2159,9 @@ def _page_4():
                     x=[f'dog {int(r["DOG_ID"])}' for r in wall],
                     y=[float(r["Z_SELF"] or 0) for r in wall],
                     marker=dict(color=[TRIAGE_COLOUR[3] if abs(r["Z_ABS"] or 0) > 2
-                                       else (ACCENT if abs(r["Z_ABS"] or 0) > 1
+                                       else (S_ORANGE if abs(r["Z_ABS"] or 0) > 1
                                              else "#D6D3D1") for r in wall]),
-                    text=[f'dog {int(r["DOG_ID"])}<br>z {fmt(r["Z_SELF"],2)}<br>'
+                    hovertext=[f'dog {int(r["DOG_ID"])}<br>z {fmt(r["Z_SELF"],2)}<br>'
                           f'{fmt(r["N"],0)} epochs' for r in wall],
                     hoverinfo="text"))
                 fig.update_layout(title="mean deviation from own baseline, by dog "
@@ -1983,7 +2190,7 @@ def _page_4():
                     cur = float(r["CURRENT_INDEX"] or 0)
                     proj = float(r["PROJECTED_INDEX"] or 0)
                     lbl = f'dog {int(r["DOG_ID"])}'
-                    hue = ACCENT if proj < cur else "#0369A1"
+                    hue = S_ORANGE if proj < cur else S_BLUE
                     fig.add_trace(go.Scatter(
                         x=[cur, proj], y=[lbl, lbl], mode="lines",
                         line=dict(color=hue, width=2), hoverinfo="skip"))
@@ -2042,7 +2249,7 @@ def _page_5():
                 fig.add_trace(go.Bar(
                     x=codes, y=ys, name=str(lbl),
                     marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E")),
-                    text=[f"{c} · {lbl}: {y} notes" for c, y in zip(codes, ys)],
+                    hovertext=[f"{c} · {lbl}: {y} notes" for c, y in zip(codes, ys)],
                     hoverinfo="text"))
             fig.update_layout(barmode="stack", showlegend=True,
                               legend=dict(orientation="h", y=-0.18,
@@ -2268,9 +2475,9 @@ def _page_6():
             vals = [float(r["F_RATIO"] or 0) for r in fi][::-1]
             fig = go.Figure(go.Bar(
                 x=vals, y=names, orientation="h",
-                marker=dict(color=[ACCENT if "CORR" in n.upper() else "#D6D3D1"
+                marker=dict(color=[S_ORANGE if "CORR" in n.upper() else "#D6D3D1"
                                    for n in names]),
-                text=[f"{n} {v:.2f}" for n, v in zip(names, vals)], hoverinfo="text"))
+                hovertext=[f"{n} {v:.2f}" for n, v in zip(names, vals)], hoverinfo="text"))
             fig.update_layout(title="how well each feature separates the states "
                                     "(neck/back correlation in amber)",
                               title_font_size=11)
@@ -2299,10 +2506,10 @@ def _page_6():
                 fig.add_trace(go.Bar(
                     x=[str(r["LABEL_PRIMARY"])],
                     y=[float(r["AVG_CORR"] or 0)],
-                    marker=dict(color=ACCENT if (r["AVG_CORR"] or 0) < 0.4 else "#0369A1"),
+                    marker=dict(color=S_ORANGE if (r["AVG_CORR"] or 0) < 0.4 else S_BLUE),
                     error_y=dict(type="data", array=[float(r["SD_CORR"] or 0)],
                                  color=BORDER, thickness=1, width=3),
-                    text=[f'{r["LABEL_PRIMARY"]}<br>mean {fmt(r["AVG_CORR"],3)}'
+                    hovertext=[f'{r["LABEL_PRIMARY"]}<br>mean {fmt(r["AVG_CORR"],3)}'
                           f'<br>median {fmt(r["MEDIAN_CORR"],3)}'
                           f'<br>IQR {fmt(r["P25_CORR"],2)}–{fmt(r["P75_CORR"],2)}'
                           f'<br>{fmt(r["EPOCHS"],0)} epochs'],
@@ -2332,9 +2539,9 @@ def _page_6():
                         x=[float(r.get("CONTRIBUTION") or 0) for r in top][::-1],
                         y=[f'{r.get("DIMENSION")} = {r.get("VALUE")}' for r in top][::-1],
                         orientation="h",
-                        marker=dict(color=[ACCENT if (r.get("CONTRIBUTION") or 0) > 0
-                                           else "#0369A1" for r in top][::-1]),
-                        text=[f'{r.get("DIMENSION")} = {r.get("VALUE")}<br>'
+                        marker=dict(color=[S_ORANGE if (r.get("CONTRIBUTION") or 0) > 0
+                                           else S_BLUE for r in top][::-1]),
+                        hovertext=[f'{r.get("DIMENSION")} = {r.get("VALUE")}<br>'
                               f'contribution {fmt(r.get("CONTRIBUTION"),5)}<br>'
                               f'lift {fmt(r.get("LIFT"),4)} · share {fmt(r.get("SHARE"),3)}<br>'
                               f'{fmt(r.get("N"),0)} epochs' for r in top][::-1],
@@ -2416,11 +2623,11 @@ def _page_7():
                 fig.add_trace(go.Scatter(
                     x=[str(r["MONTH"])[:10] for r in intake],
                     y=[float(r["BEHAVIOUR_N"] or 0) for r in intake], mode="lines",
-                    line=dict(color=ACCENT, width=1.8),
+                    line=dict(color=S_ORANGE, width=1.8),
                     text=[f'{str(r["MONTH"])[:7]}: {fmt(r["BEHAVIOUR_N"],0)} '
                           f'behaviour-linked' for r in intake], hoverinfo="text"))
                 fig.update_layout(title="Austin Animal Center dog intakes — "
-                                        f"<span style='color:{ACCENT}'>"
+                                        f"<span style='color:{S_ORANGE}'>"
                                         "behaviour-linked</span> against the total",
                                   title_font_size=11)
                 chart(clean_axes(fig), H_MD)
@@ -2440,15 +2647,15 @@ def _page_7():
                     fig = go.Figure(go.Bar(
                         x=[float(r["MEDIAN_LOS_DAYS"] or 0) for r in top],
                         y=names, orientation="h",
-                        marker=dict(color=[ACCENT if b else "#D6D3D1"
+                        marker=dict(color=[S_ORANGE if b else "#D6D3D1"
                                            for b in beh]),
-                        text=[f'{n}<br>median {fmt(r["MEDIAN_LOS_DAYS"],1)} days'
+                        hovertext=[f'{n}<br>median {fmt(r["MEDIAN_LOS_DAYS"],1)} days'
                               f'<br>{fmt(r["N"],0)} animals'
                               for n, r in zip(names, top)],
                         hoverinfo="text"))
                     fig.update_layout(
                         title="longest waits first — "
-                              f"<span style='color:{ACCENT}'>behaviour</span> "
+                              f"<span style='color:{S_ORANGE}'>behaviour</span> "
                               "intakes against every other condition",
                         title_font_size=11)
                     chart(clean_axes(fig, y_zero_line=False),
@@ -2460,29 +2667,40 @@ def _page_7():
                             ("d", "median LOS"), ("n", "n")])
 
         with c2:
+            # TWO PANELS, NOT TWO Y-AXES.
+            #
+            # Collar detections are in the tens and shelter records in the
+            # thousands, and the old chart put them on separate scales side by
+            # side — which draws two bars the same height and lets the reader
+            # conclude the counts are comparable. They are not, and the point of
+            # this tab does not need them to be: it is that the SAME CATEGORIES
+            # appear in both places. Small multiples say that without the
+            # arithmetic sleight of hand.
             if PLOTLY and punch:
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=[r["SYNDROME_CODE"] for r in punch],
-                    y=[float(r["TELLTAIL_DETECTIONS"] or 0) for r in punch],
-                    marker=dict(color=INK), name="TELLTAIL",
-                    text=[f'{r["SYNDROME_CODE"]} {r["SYNDROME_NAME"]}<br>'
-                          f'{fmt(r["TELLTAIL_DETECTIONS"],0)} detections on a collar, '
-                          f'at home' for r in punch], hoverinfo="text"))
-                fig.add_trace(go.Bar(
-                    x=[r["SYNDROME_CODE"] for r in punch],
-                    y=[float(r["SHELTER_BEHAVIOUR_RECORDS"] or 0) for r in punch],
-                    marker=dict(color=ACCENT), yaxis="y2", name="shelter",
-                    text=[f'{fmt(r["SHELTER_BEHAVIOUR_RECORDS"],0)} shelter records '
-                          f'in the same category' for r in punch], hoverinfo="text"))
-                fig.update_layout(
-                    title="the same categories, detected at home "
-                          f"(<span style='color:{INK}'>dark</span>) and recorded at "
-                          f"intake (<span style='color:{ACCENT}'>amber</span>)",
-                    title_font_size=11, barmode="group",
-                    yaxis2=dict(overlaying="y", side="right", showgrid=False,
-                                linecolor=BORDER, tickfont=dict(color=ACCENT)))
-                chart(clean_axes(fig), H_MD)
+                codes = [r["SYNDROME_CODE"] for r in punch]
+                for key, label, hue, note in (
+                    ("TELLTAIL_DETECTIONS", "detected on a collar, at home",
+                     INK, "detections"),
+                    ("SHELTER_BEHAVIOUR_RECORDS",
+                     "written down at intake, after the fact", S_ORANGE,
+                     "shelter records"),
+                ):
+                    fig = go.Figure(go.Bar(
+                        x=codes, y=[float(r[key] or 0) for r in punch],
+                        marker=dict(color=hue),
+                        hovertext=[f'{r["SYNDROME_CODE"]} {r["SYNDROME_NAME"]}<br>'
+                                   f'{fmt(r[key], 0)} {note}' for r in punch],
+                        hoverinfo="text"))
+                    fig.update_layout(title=label, title_font_size=11)
+                    chart(clean_axes(fig), H_SM)
+                st.markdown(
+                    '<div class="tt-quiet" style="margin-top:-6px">Same '
+                    'categories, two independent counts — deliberately on their '
+                    'own scales in their own panels. One is a handful of dogs '
+                    'wearing a collar for a few days; the other is a decade of a '
+                    'city shelter. Drawn against a shared axis, or against two '
+                    'axes in one frame, the bars would invite a comparison the '
+                    'numbers do not support.</div>', unsafe_allow_html=True)
 
             st.markdown(f"""
 <div class="tt-card" style="font-size:13px;line-height:1.7">
@@ -2527,34 +2745,48 @@ def _page_8():
                     'baseline layers.</span>', unsafe_allow_html=True)
         lag = rows("SELECT * FROM MARTS.V_DAG_LAG ORDER BY schema_name, object_name")
         if PLOTLY and lag:
-            # Observed against declared, per object. The bar is what the DAG
-            # actually did; the tick is what it promised. A bar past its tick is
-            # a table falling behind its target lag, and that is the one thing
-            # on this page worth noticing from across a room.
-            names = [f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}' for r in lag][::-1]
-            back = lag[::-1]
-            over = [float(r["MEAN_LAG_SEC"] or 0) > float(r["TARGET_LAG_SEC"] or 0)
-                    for r in back]
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=[float(r["MEAN_LAG_SEC"] or 0) for r in back], y=names,
-                orientation="h",
-                marker=dict(color=["#B91C1C" if o else "#D6D3D1" for o in over]),
-                text=[f'{n}<br>mean {fmt(r["MEAN_LAG_SEC"],1)}s'
-                      f'<br>max {fmt(r["MAXIMUM_LAG_SEC"],1)}s'
-                      f'<br>target {fmt(r["TARGET_LAG_SEC"],0)}s'
-                      f'<br>state {r["STATE"]}' for n, r in zip(names, back)],
+            # PLOTTED AS A RATIO, NOT IN SECONDS.
+            #
+            # In raw seconds one table sits near 20,000 and the rest under 60,
+            # so a linear axis renders eleven invisible slivers beside a single
+            # red slab and you cannot tell which of the eleven are healthy. The
+            # question is never "how many seconds" — it is "is this table
+            # keeping the promise it declared", which is observed / target. One
+            # is the line everything is read against, and every object lands on
+            # a scale where it can actually be seen.
+            def _ratio(r):
+                tgt = float(r.get("TARGET_LAG_SEC") or 0)
+                obs = float(r.get("MEAN_LAG_SEC") or 0)
+                return (obs / tgt) if tgt > 0 else None
+
+            scored = [(r, _ratio(r)) for r in lag]
+            scored = [(r, v) for r, v in scored if v is not None]
+            scored.sort(key=lambda rv: rv[1])
+            names = [f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}' for r, _ in scored]
+            vals = [v for _, v in scored]
+            fig = go.Figure(go.Bar(
+                x=vals, y=names, orientation="h",
+                marker=dict(color=["#B91C1C" if v > 1 else "#D6D3D1"
+                                   for v in vals]),
+                hovertext=[f'{n}<br>{v:.2f}x its target lag'
+                           f'<br>mean {fmt(r["MEAN_LAG_SEC"],1)}s of '
+                           f'{fmt(r["TARGET_LAG_SEC"],0)}s target'
+                           f'<br>max {fmt(r["MAXIMUM_LAG_SEC"],1)}s'
+                           f'<br>state {r["STATE"]}'
+                           for n, v, (r, _) in zip(names, vals, scored)],
                 hoverinfo="text"))
-            fig.add_trace(go.Scatter(
-                x=[float(r["TARGET_LAG_SEC"] or 0) for r in back], y=names,
-                mode="markers",
-                marker=dict(color=INK, size=9, symbol="line-ns-open",
-                            line=dict(width=1.6, color=INK)),
-                text=[f'target {fmt(r["TARGET_LAG_SEC"],0)}s' for r in back],
-                hoverinfo="text"))
-            fig.update_layout(title="observed mean lag (bar) against declared "
-                                    "target (tick) — seconds",
-                              title_font_size=11)
+            fig.add_vline(x=1, line=dict(color=INK, width=1.5, dash="dot"))
+            fig.update_layout(
+                title="observed lag as a multiple of the declared target — "
+                      "past the dotted line is a table falling behind",
+                title_font_size=11,
+                # explicit ticks: a log axis left to itself labels every minor
+                # decade step (3,4,5,6,7,8,9,1,2,...) which reads as noise
+                xaxis=dict(type="log", title="× target lag",
+                           tickmode="array",
+                           tickvals=[0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50],
+                           ticktext=["0.1×", "0.25×", "0.5×", "1× target",
+                                     "2×", "5×", "10×", "25×", "50×"]))
             chart(clean_axes(fig, y_zero_line=False), bars(len(names)))
         if lag:
             html_table([{"o": f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}',
@@ -2625,7 +2857,7 @@ def _page_8():
             fig = go.Figure(go.Scatter(
                 x=[str(r["HOUR"])[:16] for r in cb],
                 y=[float(r["CUMULATIVE_CREDITS"] or 0) for r in cb],
-                mode="lines", line=dict(color=ACCENT, width=1.6),
+                mode="lines", line=dict(color=S_ORANGE, width=1.6),
                 text=[f'{str(r["HOUR"])[:16]}<br>{fmt(r["CREDITS"],4)} this hour<br>'
                       f'{fmt(r["CUMULATIVE_CREDITS"],3)} cumulative' for r in cb],
                 hoverinfo="text"))
@@ -2795,12 +3027,15 @@ def _page_9():
 
     # ---- layout -----------------------------------------------------------
     #
-    # ONE CENTRED COLUMN, not the full page width. `layout="wide"` is right for
-    # a dashboard of charts and wrong for a conversation: run a transcript
-    # across 1600px and every bubble becomes a single 200-character line with a
-    # 48px avatar marooned at the far left. The outer columns are empty on
-    # purpose — they are the margin.
-    _pad_l, mid, _pad_r = st.columns([1, 4, 1])
+    # ONE CENTRED COLUMN.
+    #
+    # `layout="wide"` is right for a dashboard of charts and wrong for a
+    # conversation: run a transcript across 1600px and every bubble is a single
+    # 200-character line with a 48px avatar marooned at the far left. Left-
+    # aligning it inside the wide page fixed the line length but left a third
+    # of the screen empty down the right-hand side, which reads as a layout
+    # that failed rather than one that chose. Equal margins, 75% of the width.
+    _pad_l, mid, _pad_r = st.columns([1, 6, 1])
 
     with mid:
         st.markdown(
@@ -2843,10 +3078,9 @@ def _page_9():
                       placeholder="Ask about the pack, the syndromes, the "
                                   "classifier or the pipeline")
 
-        # Starters, sized to their own text. These were full-width buttons and
-        # five of them across a wide page looked like the primary navigation of
-        # the tab rather than four suggestions under a text box.
-        chips = st.columns([2, 2, 2, 2, 1, 4])
+        # Starters. Five equal columns rather than a weighted split: the last
+        # one was 1/12 of the row and rendered the word "Clear" as "Cle ar".
+        chips = st.columns(5)
         for c, (short, full) in zip(chips, examples):
             c.button(short, key="ex_" + short, on_click=_chat_ask, args=(full,),
                      use_container_width=True)
