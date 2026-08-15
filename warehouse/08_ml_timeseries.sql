@@ -101,12 +101,50 @@ $$;
 -- STRICT `<` on the training side. Synthetic rows are excluded: the demo spike
 -- must be visible to the detector and invisible to the fit, or the detector
 -- learns the spike is normal and the demo silently does nothing.
+-- DENSE SERIES ONLY.
+--
+-- ML.ACTIVITY_HISTORY mixes two clocks: dogs replayed into the live path carry
+-- current timestamps, while the rest carry the corpus's own. Fed the union,
+-- SNOWFLAKE.ML.FORECAST sees 45 series spread over seven months with enormous
+-- gaps, spends twenty-plus minutes trying to infer a frequency that does not
+-- exist, and produces nothing worth reading even when it returns.
+--
+-- A forecast needs a regular grid, so this trains only on series that HAVE
+-- one: at least `forecast_min_points` observations inside the recent window.
+-- Excluded dogs are not hidden — ML.V_FORECAST_COVERAGE below counts them, and
+-- the Baselines tab says how many dogs the forecast actually covers.
 CREATE OR REPLACE VIEW ML.V_ACTIVITY_TRAIN AS
-SELECT dog_id::VARCHAR AS series, ts, activity_index
-FROM ML.ACTIVITY_HISTORY
-WHERE ts < (SELECT boundary_ts FROM ML.SPLIT_BOUNDARY)
-  AND NOT COALESCE(is_synthetic, FALSE)
-  AND activity_index IS NOT NULL;
+WITH windowed AS (
+    SELECT dog_id, ts, activity_index
+    FROM ML.ACTIVITY_HISTORY
+    WHERE ts < (SELECT boundary_ts FROM ML.SPLIT_BOUNDARY)
+      AND ts >= DATEADD('hour',
+                        -(SELECT value_num FROM REF.PARAMS
+                           WHERE key = 'forecast_window_hours'),
+                        (SELECT boundary_ts FROM ML.SPLIT_BOUNDARY))
+      AND NOT COALESCE(is_synthetic, FALSE)
+      AND activity_index IS NOT NULL
+),
+dense AS (
+    SELECT dog_id FROM windowed GROUP BY dog_id
+    HAVING COUNT(*) >= (SELECT value_num FROM REF.PARAMS
+                         WHERE key = 'forecast_min_points')
+)
+SELECT w.dog_id::VARCHAR AS series, w.ts, w.activity_index
+FROM windowed w JOIN dense d ON d.dog_id = w.dog_id;
+
+-- How much of the pack the forecast actually speaks for. A column, not a
+-- footnote: a forecast over 12 of 45 dogs is a different claim from one over
+-- all of them, and the dashboard has to be able to say which.
+CREATE OR REPLACE VIEW ML.V_FORECAST_COVERAGE AS
+SELECT
+    (SELECT COUNT(DISTINCT dog_id) FROM ML.ACTIVITY_HISTORY)      AS dogs_total,
+    (SELECT COUNT(DISTINCT series) FROM ML.V_ACTIVITY_TRAIN)      AS dogs_forecast,
+    (SELECT COUNT(*) FROM ML.V_ACTIVITY_TRAIN)                    AS train_points,
+    (SELECT value_num FROM REF.PARAMS WHERE key = 'forecast_window_hours')
+                                                                  AS window_hours,
+    (SELECT value_num FROM REF.PARAMS WHERE key = 'forecast_min_points')
+                                                                  AS min_points;
 
 -- `>=` on the detection side. Same boundary. Synthetic rows INCLUDED.
 CREATE OR REPLACE VIEW ML.V_ACTIVITY_DETECT AS
@@ -155,6 +193,7 @@ BEGIN
     SELECT COUNT(*) INTO :n_train FROM ML.V_ACTIVITY_TRAIN;
 
     IF (:n_train < 100) THEN
+        DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'FORECAST';
         INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
         VALUES ('FORECAST', 'SKIPPED',
                 'only ' || :n_train || ' training points; needs the replayer to run first', 0);
@@ -181,6 +220,7 @@ BEGIN
             CURRENT_TIMESTAMP()                   AS generated_at
         FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
 
+        DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'FORECAST';
         INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
         SELECT 'FORECAST', 'OK', 'horizon=' || :horizon, COUNT(*) FROM ML.ACTIVITY_FORECAST;
 
@@ -191,6 +231,7 @@ BEGIN
             CREATE TABLE IF NOT EXISTS ML.ACTIVITY_FORECAST (
                 dog_id NUMBER, forecast_ts TIMESTAMP_NTZ, forecast FLOAT,
                 lower_bound FLOAT, upper_bound FLOAT, generated_at TIMESTAMP_NTZ);
+            DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'FORECAST';
             INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
             VALUES ('FORECAST', 'FAILED', :err, 0);
             RETURN 'FORECAST failed (recorded, build continues): ' || SQLERRM;
@@ -212,6 +253,7 @@ BEGIN
     SELECT COUNT(*) INTO :n_detect FROM ML.V_ACTIVITY_DETECT;
 
     IF (:n_train < 100 OR :n_detect < 5) THEN
+        DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'ANOMALY_DETECTION';
         INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
         VALUES ('ANOMALY_DETECTION', 'SKIPPED',
                 'train=' || :n_train || ' detect=' || :n_detect, 0);
@@ -253,6 +295,7 @@ BEGIN
         LEFT JOIN ML.ACTIVITY_HISTORY h
                ON h.dog_id = r.series::NUMBER AND h.ts = r.ts;
 
+        DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'ANOMALY_DETECTION';
         INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
         SELECT 'ANOMALY_DETECTION', 'OK',
                'anomalies=' || SUM(IFF(is_anomaly, 1, 0)), COUNT(*)
@@ -268,6 +311,7 @@ BEGIN
                 lower_bound FLOAT, upper_bound FLOAT, is_anomaly BOOLEAN,
                 percentile FLOAT, distance FLOAT, is_synthetic BOOLEAN,
                 generated_at TIMESTAMP_NTZ);
+            DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'ANOMALY_DETECTION';
             INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
             VALUES ('ANOMALY_DETECTION', 'FAILED', :err, 0);
             RETURN 'ANOMALY failed (recorded, build continues): ' || SQLERRM;
@@ -319,6 +363,8 @@ RETURNS STRING
 LANGUAGE SQL
 AS
 $$
+DECLARE
+    err STRING DEFAULT '';
 BEGIN
     BEGIN
         CREATE OR REPLACE TABLE ML.DRIVER_INSIGHTS AS
@@ -338,12 +384,14 @@ BEGIN
             FROM ML.V_INSIGHT_INPUT
         ));
 
+        DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'TOP_INSIGHTS';
         INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
         SELECT 'TOP_INSIGHTS', 'OK', 'native function', COUNT(*) FROM ML.DRIVER_INSIGHTS;
         RETURN 'TOP_INSIGHTS (native): '
             || (SELECT COUNT(*) FROM ML.DRIVER_INSIGHTS) || ' insights';
     EXCEPTION
         WHEN OTHER THEN
+            err := SQLERRM;
             -- Transparent contribution decomposition. For every dimension value:
             --   lift         = mean(metric | in syndrome) - mean(metric | not)
             --   share        = fraction of all epochs in this slice
@@ -386,12 +434,17 @@ BEGIN
             WHERE a.n >= 50            -- a slice of nine epochs is not a driver
             ORDER BY ABS(contribution) DESC;
 
+            -- :err, not SQLERRM. Concatenation does not make it legal — this
+            -- is still SQLERRM inside a DML statement, and unhandled it took
+            -- T_DRIVERS down on the line meant to record why the native call
+            -- had failed, losing both the insights and the reason.
+            DELETE FROM ML.FUNCTION_STATUS WHERE fn = 'TOP_INSIGHTS';
             INSERT INTO ML.FUNCTION_STATUS (fn, status, detail, rows_out)
             SELECT 'TOP_INSIGHTS', 'OK',
-                   'SQL contribution fallback: ' || SQLERRM, COUNT(*) FROM ML.DRIVER_INSIGHTS;
+                   'SQL contribution fallback: ' || :err, COUNT(*) FROM ML.DRIVER_INSIGHTS;
             RETURN 'TOP_INSIGHTS (SQL fallback): '
                 || (SELECT COUNT(*) FROM ML.DRIVER_INSIGHTS) || ' rows. Native call said: '
-                || SQLERRM;
+                || :err;
     END;
 END;
 $$;

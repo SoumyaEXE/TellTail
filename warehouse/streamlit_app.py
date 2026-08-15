@@ -103,6 +103,20 @@ st.markdown(f"""
      is what makes the bottom edges line up across a row */
   .tt-spark {{ margin-top:auto; padding-top:8px; }}
   .tt-dogcard-foot {{ margin-top:4px; }}
+  /* left rail + page header */
+  section[data-testid="stSidebar"] {{ background: {CARD};
+      border-right: 1px solid {BORDER}; }}
+  section[data-testid="stSidebar"] .stRadio > div {{ gap: 1px; }}
+  section[data-testid="stSidebar"] label {{ font-size: 13.5px; }}
+  .tt-railnote {{ margin-top: 14px; padding: 8px 10px; background: {BG};
+      border-radius: 0 4px 4px 0; font-size: 12px; line-height: 1.4; }}
+  .tt-pagehead {{ padding: 2px 0 2px 12px; margin: 0 0 12px; }}
+  .tt-pagetitle {{ font-size: 21px; font-weight: 700; letter-spacing: -.015em;
+      color: {INK}; }}
+  /* Streamlit's default block padding wastes the top third of a 1080p screen
+     on a dashboard that is meant to be read at a glance across the room. */
+  .block-container {{ padding-top: 2.2rem; padding-bottom: 2rem; }}
+  h3 {{ margin-top: .4rem !important; }}
   .tt-chip {{ display:inline-block; padding: 1px 7px; border-radius: 3px;
       font-size: 11px; font-weight: 600; border: 1px solid {BORDER}; }}
   .tt-badge {{ display:inline-block; padding: 2px 9px; border-radius: 3px;
@@ -153,6 +167,23 @@ def rows(sql: str) -> list[dict]:
         st.session_state.setdefault("_errors", []).append((sql[:120], str(exc)))
         return []
     return [{k: _scrub(v) for k, v in r.as_dict().items()} for r in res]
+
+
+def rows_live(sql: str) -> list[dict]:
+    """rows() without the cache. Exactly one caller: the Cortex chat, where a
+    cached answer to a new question would be a lie."""
+    try:
+        res = _session().sql(sql).collect()
+    except Exception as exc:  # noqa: BLE001
+        st.session_state.setdefault("_errors", []).append((sql[:120], str(exc)))
+        raise
+    return [{k: _scrub(v) for k, v in r.as_dict().items()} for r in res]
+
+
+def sq(text: str) -> str:
+    """Single-quote a string for inline SQL. The Snowpark .sql() path here takes
+    no bind parameters, so the literal has to be escaped rather than bound."""
+    return "'" + str(text).replace("\\", "\\\\").replace("'", "''") + "'"
 
 
 def col(data: list[dict], name: str, default=None) -> list:
@@ -485,6 +516,12 @@ with st.sidebar:
         unsafe_allow_html=True)
 
 PAGE, PAGE_SUB, PAGE_HUE = _meta
+
+# Which Cortex model, from REF.PARAMS rather than hardcoded here — the same row
+# the AI layer procedures read, so the dashboard cannot drift from what ran.
+CORTEX_MODEL = one(
+    rows("SELECT value_str AS m FROM REF.PARAMS WHERE key = 'cortex_model'"),
+    "M", "claude-sonnet-4-5")
 
 st.markdown(
     f'<div class="tt-pagehead" style="border-left:4px solid {PAGE_HUE}">'
@@ -1303,6 +1340,69 @@ def _page_5():
 # ===========================================================================
 def _page_6():
     st.markdown("#### Drivers")
+
+    # THE SEPARATION, IN THE THREE AXES THE DESIGN ARGUES ABOUT.
+    #
+    # 3D because the claim is three-dimensional and flattens badly: locomotion
+    # separates on neck/back CORRELATION, neck-driven behaviour separates on
+    # neck DOMINANCE, and stillness separates on neck SD. Any 2D pair of those
+    # three collapses two clusters on top of each other — project it yourself
+    # by dragging the cube and you can watch it happen. Sampled per state so
+    # the rare classes stay visible next to SNIFF.
+    st.markdown("**The feature space, in the three axes the ethogram turns on**")
+    st.markdown('<span class="tt-quiet">Drag to rotate. Each point is one '
+                'labelled second. Locomotion climbs the correlation axis; '
+                'SHAKE and SCRATCH climb the dominance axis; REST and SIT '
+                'collapse into the low-motion corner. This is the whole '
+                'classifier argument in one object.</span>',
+                unsafe_allow_html=True)
+    fs = rows("""
+        SELECT state, neck_back_corr, vm_neck_std, neck_dominance
+        FROM ML.V_LABELLED_EPOCHS
+        WHERE neck_back_corr IS NOT NULL
+          AND vm_neck_std IS NOT NULL
+          AND neck_dominance IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY state ORDER BY RANDOM()) <= 320
+    """)
+    if PLOTLY and fs:
+        pal = state_palette()
+        by_state: dict = {}
+        for r in fs:
+            by_state.setdefault(r["STATE"], []).append(r)
+        fig = go.Figure()
+        for stt in sorted(by_state):
+            pts = by_state[stt]
+            fig.add_trace(go.Scatter3d(
+                x=[float(r["NECK_BACK_CORR"]) for r in pts],
+                y=[float(r["VM_NECK_STD"]) for r in pts],
+                # log-ish squash: dominance runs to ~50 for a head shake and
+                # would otherwise flatten every other class onto the floor
+                z=[min(float(r["NECK_DOMINANCE"]), 8.0) for r in pts],
+                mode="markers", name=stt,
+                marker=dict(size=2.2, color=pal.get(stt, "#999"), opacity=0.72),
+                hovertemplate=(stt + "<br>corr %{x:.2f}<br>neck sd %{y:.2f}"
+                               "<br>dominance %{z:.2f}<extra></extra>")))
+        fig.update_layout(
+            scene=dict(
+                xaxis=dict(title="neck/back corr", backgroundcolor=CARD,
+                           gridcolor=BORDER, zerolinecolor=BORDER),
+                yaxis=dict(title="neck SD (g)", backgroundcolor=CARD,
+                           gridcolor=BORDER, zerolinecolor=BORDER),
+                zaxis=dict(title="neck dominance (clipped at 8)",
+                           backgroundcolor=CARD, gridcolor=BORDER,
+                           zerolinecolor=BORDER),
+                camera=dict(eye=dict(x=1.6, y=1.5, z=0.9))),
+            paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=True,
+            legend=dict(itemsizing="constant", font=dict(size=10)),
+            margin=dict(l=0, r=0, t=4, b=0),
+            font=dict(family="Geist, Inter, sans-serif", size=11, color=INK_2))
+        fig.update_layout(height=430)
+        st.plotly_chart(fig, use_container_width=True,
+                        config={"displayModeBar": False})
+    else:
+        empty_state("No labelled epochs to plot.",
+                    "Needs the bulk load and the Gate A label map.")
+
     ms = rows("SELECT * FROM ML.MODEL_SUMMARY")
     if ms:
         m = ms[0]
@@ -1697,6 +1797,124 @@ if st.session_state.get("_errors"):
         for sql, err in st.session_state["_errors"][-25:]:
             st.markdown(f'<div class="tt-mono" style="font-size:11px">'
                         f'<b>{sql}</b><br>{err}</div>', unsafe_allow_html=True)
+
+# ===========================================================================
+# PAGE 10 — ASK TELLTAIL.  Cortex, grounded in the warehouse.
+#
+# Not a general chatbot bolted on to name-drop an LLM. The question is answered
+# from rows: a compact factual context is assembled in SQL first — the pack
+# summary, the syndrome counts, the sensitivity curve, the honest accuracy —
+# and AI_COMPLETE is asked to answer ONLY from that, and to say so when the
+# answer is not in there. The context it was given is printed underneath, so
+# any claim on screen can be checked against the table it came from.
+# ===========================================================================
+def _page_9():
+    st.markdown(
+        '<div class="tt-card" style="font-size:13px;line-height:1.55">'
+        'Ask about the pack, the syndromes, the classifier or the pipeline. '
+        'The answer is generated by <span class="tt-mono">AI_COMPLETE</span> '
+        'over a factual context assembled from the warehouse in SQL — shown '
+        'in full below every answer, so nothing here is unverifiable. '
+        '<span class="tt-quiet">Cortex on a trial account is capped at roughly '
+        'ten credits of AI Function usage per day; each question is one '
+        'call.</span></div>', unsafe_allow_html=True)
+
+    facts = rows("""
+        SELECT 'holdout' AS topic,
+               'Dog-disjoint holdout accuracy ' ||
+               COALESCE(TO_VARCHAR(ROUND(100 * MAX(m.holdout_accuracy), 2)), 'n/a') ||
+               '% over ' || COALESCE(TO_VARCHAR(MAX(m.holdout_dogs)), '0') ||
+               ' entirely unseen dogs, macro F1 ' ||
+               COALESCE(TO_VARCHAR(ROUND(MAX(m.macro_f1), 3)), 'n/a') ||
+               ', classifier ' || COALESCE(MAX(m.classifier), 'n/a') AS fact
+        FROM ML.MODEL_SUMMARY m
+        UNION ALL
+        SELECT 'syndromes',
+               'Syndrome ' || syndrome_code || ' (' || ANY_VALUE(syndrome_name) ||
+               ', ' || ANY_VALUE(body_system) || '): ' || COUNT(*) ||
+               ' matches over ' || COUNT(DISTINCT dog_id) ||
+               ' dogs, mean confidence ' || ROUND(AVG(confidence), 3)
+        FROM MARTS.SYNDROME_MATCHES GROUP BY syndrome_code
+        UNION ALL
+        SELECT 'not_firing',
+               'Syndrome ' || c.syndrome_code || ' (' || c.syndrome_name ||
+               ') has ZERO matches in this corpus.'
+        FROM REF.SYNDROME_CATALOGUE c
+        WHERE c.syndrome_code NOT IN (SELECT syndrome_code FROM MARTS.SYNDROME_MATCHES)
+        UNION ALL
+        SELECT 'sensitivity',
+               'Sensitivity sweep ' || syndrome_code || '/' || variant ||
+               ': ' || COUNT(*) || ' matches'
+        FROM MARTS.SYNDROME_SENSITIVITY GROUP BY syndrome_code, variant
+        UNION ALL
+        SELECT 'states',
+               'State ' || state || ': ' || COUNT(*) || ' epochs (' ||
+               ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) || '%)'
+        FROM MARTS.EPOCH_STATES GROUP BY state
+        UNION ALL
+        SELECT 'provenance',
+               'state_source ' || state_source || ': ' || COUNT(*) || ' epochs'
+        FROM MARTS.EPOCH_STATES GROUP BY state_source
+        UNION ALL
+        SELECT 'shelter',
+               'Austin shelter, ' || syndrome_name || ': ' ||
+               shelter_behaviour_records || ' shelter records versus ' ||
+               telltail_detections || ' collar detections'
+        FROM REF.V_SHELTER_PUNCHLINE
+        UNION ALL
+        SELECT 'scale',
+               'Corpus: ' || (SELECT COUNT(*) FROM MARTS.EPOCH_STATES) ||
+               ' classified epochs over ' ||
+               (SELECT COUNT(*) FROM REF.DOG_INFO) || ' dogs'
+    """)
+    context = chr(10).join(f"- [{r['TOPIC']}] {r['FACT']}"
+                           for r in facts if r.get("FACT"))
+
+    examples = [
+        "Which syndromes fired, and which found nothing?",
+        "How accurate is the classifier, honestly?",
+        "How does what we detect compare to the Austin shelter outcomes?",
+        "What fraction of states came from the model rather than a heuristic?",
+    ]
+    pick = st.selectbox("start from a question, or write your own", ["—"] + examples)
+    default = "" if pick == "—" else pick
+    q = st.text_input("your question", value=default,
+                      placeholder="e.g. why does S1 not fire?")
+
+    if st.button("Ask", type="primary") and q.strip():
+        prompt = (
+            "You are TELLTAIL, a veterinary telemetry analyst. Answer the "
+            "question using ONLY the facts listed below, which come from a "
+            "Snowflake warehouse. Quote the specific numbers you use. If the "
+            "facts do not contain the answer, say exactly what is missing "
+            "rather than guessing. Be concise: at most 130 words. Never imply "
+            "this is a diagnosis." + chr(10) * 2 + "FACTS:" + chr(10) + context
+            + chr(10) * 2 + "QUESTION: " + q.strip()
+        )
+        try:
+            ans = rows_live(
+                "SELECT SNOWFLAKE.CORTEX.COMPLETE("
+                + sq(CORTEX_MODEL) + ", " + sq(prompt) + ") AS a")
+            st.markdown(
+                f'<div class="tt-card" style="border-left:3px solid {PAGE_HUE};'
+                f'font-size:14px;line-height:1.6">{one(ans, "A", "")}</div>',
+                unsafe_allow_html=True)
+        except Exception as exc:  # noqa: BLE001
+            empty_state("Cortex did not answer.", str(exc)[:300])
+
+    with st.expander(f"the exact context the model was given ({len(facts)} facts "
+                     f"from SQL)"):
+        st.code(context or "(no facts)", language="text")
+
+
+PAGE_FN = {
+    "Pack": _page_0, "Live Collar": _page_1, "Ethogram": _page_2,
+    "Syndromes": _page_3, "Baselines": _page_4, "Vet Note": _page_5,
+    "Drivers": _page_6, "Shelter Reality": _page_7, "Pipeline": _page_8,
+    "Ask TELLTAIL": _page_9,
+}
+PAGE_FN[PAGE]()
+
 
 st.markdown(
     f'<div class="tt-quiet" style="margin-top:24px;border-top:1px solid {BORDER};'

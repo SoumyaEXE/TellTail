@@ -207,6 +207,8 @@ SELECT * FROM VALUES
  ('baseline_window_epochs',   3600, NULL, 'epochs',  'Trailing self-baseline window, in one-second epochs (1 hour of dog time).'),
  ('baseline_min_epochs',      300,  NULL, 'epochs',  'Below this the baseline is null rather than noise.'),
  -- anomaly / forecast
+ ('forecast_window_hours',    6, NULL, 'hours',  'FORECAST: only observations this recent are trained on.'),
+ ('forecast_min_points',     15, NULL, 'points', 'FORECAST: a series needs this many points in the window to be forecastable. 15 because a 35-minute replay yields 19 per dog; raise it if the feed runs longer.'),
  ('forecast_horizon',         60,   NULL, 'periods', 'ML.FORECAST horizon on the per-dog activity index.'),
  ('anomaly_detect_window',    900,  NULL, 'seconds', 'Detect window. Train is ts < T, detect is ts >= T, same T. No overlap.'),
  -- cortex budget
