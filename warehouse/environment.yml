@@ -22,3 +22,14 @@ dependencies:
   - plotly
   - pandas
   - numpy
+  # Bokeh draws the linked multi-panel signal view on Live Collar, and nothing
+  # else. It is here rather than in Streamlit's own dependency set because
+  # Streamlit does not depend on it — unlike altair, which ships with
+  # streamlit and is therefore DELIBERATELY NOT LISTED HERE. Declaring altair
+  # would put a second constraint on a package Streamlit already pins, and the
+  # conda solve in SiS is all-or-nothing: if it fails, the app does not render
+  # a broken chart, it does not render at all.
+  #
+  # The app never calls st.bokeh_chart — that helper pinned Bokeh to exactly
+  # 2.4.3 and the Snowflake channel's Bokeh is 3.x. See bokeh_panel().
+  - bokeh
