@@ -2432,39 +2432,49 @@ def _page_1():
                                     f"<span style='color:{S_ORANGE}'>neck collar</span> vs "
                                     f"<span style='color:{S_BLUE}'>back harness</span>",
                               title_font_size=12)
-            chart(clean_axes(fig, y_zero_line=False), H_SM)
+            chart(evil_axes(fig, y_zero_line=False), H_SM)
 
             if feat:
                 xs = [str(r["EPOCH_TS"]) for r in feat]
+                # THE DERIVED FEATURES GET THE FILL; THE RAW WAVEFORM ABOVE
+                # DOES NOT, AND THE DIFFERENCE IS DELIBERATE. A 100 Hz trace
+                # oscillates about its own mean hundreds of times across the
+                # panel, so filling to zero paints a solid block of colour and
+                # destroys the only thing the panel is for. An epoch feature is
+                # one value per second with a real baseline at zero, which is
+                # exactly the shape an area chart is for.
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=xs, y=[float(r["VM_NECK_MEAN"] or 0) for r in feat],
-                    mode="lines", line=dict(color=INK, width=1.6),
-                    name="vm mean", hoverinfo="skip"))
+                evil_area(fig, xs, [float(r["VM_NECK_MEAN"] or 0) for r in feat],
+                          INK, width=1.6, shape="linear", name="vm mean",
+                          text=[f"mean {fmt(r['VM_NECK_MEAN'])} g" for r in feat])
                 fig.add_trace(go.Scatter(
                     x=xs, y=[float(r["VM_NECK_STD"] or 0) for r in feat],
                     mode="lines", line=dict(color=INK_2, width=1.2, dash="dot"),
-                    name="vm sd", hoverinfo="skip"))
+                    name="vm sd", hoverinfo="skip", showlegend=False))
                 fig.update_layout(
                     title="2 · derived epoch features — neck vector magnitude, "
                           "mean (solid) and standard deviation (dotted), in g",
                     title_font_size=12)
-                chart(clean_axes(fig, y_zero_line=False), H_SM)
+                chart(evil_axes(fig, y_zero_line=False), H_SM)
 
+                # CORRELATION IS SIGNED, SO THIS ONE FILLS TO ZERO RATHER THAN
+                # TO THE FLOOR. tozeroy on a [-1, 1] axis fills DOWNWARD for
+                # the negative stretches, which is the correct reading: the
+                # neck-dominant seconds hang below the line instead of being
+                # drawn as a short bar above it.
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=xs, y=[float(r["NECK_BACK_CORR"] or 0) for r in feat],
-                    mode="lines", line=dict(color=S_ORANGE, width=1.8), name="corr",
+                evil_area(
+                    fig, xs, [float(r["NECK_BACK_CORR"] or 0) for r in feat],
+                    S_ORANGE, width=1.8, shape="linear", name="corr",
                     text=[f"corr {fmt(r['NECK_BACK_CORR'])}<br>{r.get('STATE')}"
-                          for r in feat],
-                    hoverinfo="text"))
+                          for r in feat])
                 fig.add_hline(y=0, line=dict(color=BORDER, width=1))
                 fig.update_layout(
                     title="3 · the feature the states are built on — "
                           "CORR(vm_neck, vm_back) over the same seconds, [-1, 1]",
                     title_font_size=12,
                     yaxis=dict(range=[-1.05, 1.05]))
-                chart(clean_axes(fig, y_zero_line=False), H_SM)
+                chart(evil_axes(fig, y_zero_line=False), H_SM)
 
         if wave and any(r.get("IS_SYNTHETIC") for r in wave):
             st.markdown('<div class="tt-caveat">This window contains '
@@ -4678,7 +4688,39 @@ def _page_8():
             empty_state("No refresh history yet.",
                         "Dynamic Tables report after their first refresh.")
 
-        st.markdown("**ML function status**")
+    with c2:
+        panel("Credit burn",
+              "Cumulative credits over seven days. Every one of them was spent "
+              "by a task, never by a page render.")
+        cb = rows("SELECT * FROM MARTS.V_CREDIT_BURN ORDER BY hour")
+        if PLOTLY and cb:
+            fig = go.Figure()
+            evil_area(
+                fig, [str(r["HOUR"])[:16] for r in cb],
+                [float(r["CUMULATIVE_CREDITS"] or 0) for r in cb],
+                S_ORANGE, width=1.8, shape="linear", cap=True,
+                text=[f'{str(r["HOUR"])[:16]}<br>{fmt(r["CREDITS"],4)} this hour<br>'
+                      f'{fmt(r["CUMULATIVE_CREDITS"],3)} cumulative' for r in cb])
+            fig.update_layout(title="cumulative credits, 7 days (trial grant is 400)",
+                              title_font_size=11)
+            chart(evil_axes(fig), H_MD)
+        else:
+            empty_state("No credit history yet.",
+                        "MARTS.V_CREDIT_BURN reads the account usage views.")
+
+    # ----------------------------------------------------------------------
+    # THE FOUR OPERATIONAL TABLES, PAIRED.
+    #
+    # These were four tables stacked in the left column against three sections
+    # in the right, so the halves of this page ended about a screen apart and
+    # the tab finished with a column of parameters against nothing. Two rows of
+    # two, each pairing a table with a table of similar length.
+    # ----------------------------------------------------------------------
+    g1, g2 = st.columns(2)
+
+    with g1:
+        panel("ML function status",
+              "The last run of each modelling routine, and what it returned.")
         fs = rows("SELECT fn, status, detail, rows_out, ran_at FROM ML.FUNCTION_STATUS "
                   "QUALIFY ROW_NUMBER() OVER (PARTITION BY fn ORDER BY ran_at DESC) = 1")
         if fs:
@@ -4686,35 +4728,13 @@ def _page_8():
                          "d": str(r["DETAIL"] or "")[:80]} for r in fs],
                        [("f", "function"), ("s", "status"), ("n", "rows"),
                         ("d", "detail")])
+        else:
+            empty_state("No ML runs recorded.",
+                        "ML.FUNCTION_STATUS is written by the modelling procs.")
 
-        st.markdown("**Cortex usage**")
-        us = rows("SELECT * FROM AI.V_USAGE_SUMMARY")
-        if us:
-            html_table([{"f": r["FN"], "c": fmt(r["TOTAL_CALLS"], 0),
-                         "d": fmt(r["CALLS_LAST_24H"], 0),
-                         "b": fmt(r["BATCHES"], 0),
-                         "x": fmt(r["FAILED_BATCHES"], 0)} for r in us],
-                       [("f", "function"), ("c", "calls total"),
-                        ("d", "calls 24h"), ("b", "batches"), ("x", "failed")])
-            st.markdown('<span class="tt-quiet">Trial accounts without a payment '
-                        'method are capped at roughly ten credits per day of AI '
-                        'Function usage. Every call here was made by a task, into '
-                        'a table, deduped on the finding key.</span>',
-                        unsafe_allow_html=True)
-
-        st.markdown("**Parameters**")
-        st.markdown('<span class="tt-quiet">Every threshold in the build. No magic '
-                    'numbers live in SQL.</span>', unsafe_allow_html=True)
-        pr = rows("SELECT key, COALESCE(TO_VARCHAR(value_num), value_str) AS v, unit, "
-                  "description FROM REF.PARAMS ORDER BY key")
-        if pr:
-            html_table([{"k": r["KEY"], "v": r["V"], "u": r["UNIT"],
-                         "d": str(r["DESCRIPTION"])[:90]} for r in pr],
-                       [("k", "key"), ("v", "value"), ("u", "unit"),
-                        ("d", "what it does")])
-
-    with c2:
-        st.markdown("**Task history**")
+    with g2:
+        panel("Task history",
+              "The forty most recent scheduled runs, newest first.")
         th = rows("SELECT task_name, state, scheduled_time, duration_ms, return_value, "
                   "error_message FROM MARTS.V_TASK_HISTORY "
                   "ORDER BY scheduled_time DESC LIMIT 40")
@@ -4729,47 +4749,68 @@ def _page_8():
         else:
             empty_state("No task runs yet.", "Tasks resume at the end of 11_tasks.sql.")
 
-        st.markdown("**Credit burn**")
-        cb = rows("SELECT * FROM MARTS.V_CREDIT_BURN ORDER BY hour")
-        if PLOTLY and cb:
-            fig = go.Figure(go.Scatter(
-                x=[str(r["HOUR"])[:16] for r in cb],
-                y=[float(r["CUMULATIVE_CREDITS"] or 0) for r in cb],
-                mode="lines", line=dict(color=S_ORANGE, width=1.6),
-                text=[f'{str(r["HOUR"])[:16]}<br>{fmt(r["CREDITS"],4)} this hour<br>'
-                      f'{fmt(r["CUMULATIVE_CREDITS"],3)} cumulative' for r in cb],
-                hoverinfo="text"))
-            fig.update_layout(title="cumulative credits, 7 days (trial grant is 400)",
-                              title_font_size=11)
-            chart(clean_axes(fig), H_SM)
+    h1, h2 = st.columns(2)
 
-        # ------------------------------------------------------------------
-        # WHO PUBLISHES, AND HOW FAR EACH CLAIM GOT.
-        #
-        # The wallet and cluster are read from REF.PARAMS rather than hardcoded
-        # here, because the bridge is a separate process and the dashboard must
-        # not be able to disagree with it about who signs. The API KEY is
-        # deliberately absent from the warehouse — the host is recorded, the
-        # credential stays in .env beside the keypair. SiS has no outbound
-        # network, so nothing on this page queries Solana; every number here is
-        # the audit trail the bridge wrote back.
-        # ------------------------------------------------------------------
-        st.markdown("**On-chain attestations**")
-        chain = {r["KEY"]: r["VALUE_STR"] for r in rows(
-            "SELECT key, value_str FROM REF.PARAMS WHERE key LIKE 'solana%'")}
-        funnel = rows("""
-            SELECT status, COUNT(*) AS n
-            FROM ORACLE.PUBLISH_QUEUE GROUP BY status
-        """)
-        counts = {r["STATUS"]: int(r["N"] or 0) for r in funnel}
-        wallet = chain.get("solana_authority") or "not configured"
-        if chain:
-            st.markdown(f"""
+    with h1:
+        panel("Cortex usage",
+              "Every AI Function call the build has made, by function.")
+        us = rows("SELECT * FROM AI.V_USAGE_SUMMARY")
+        if us:
+            html_table([{"f": r["FN"], "c": fmt(r["TOTAL_CALLS"], 0),
+                         "d": fmt(r["CALLS_LAST_24H"], 0),
+                         "b": fmt(r["BATCHES"], 0),
+                         "x": fmt(r["FAILED_BATCHES"], 0)} for r in us],
+                       [("f", "function"), ("c", "calls total"),
+                        ("d", "calls 24h"), ("b", "batches"), ("x", "failed")])
+            st.markdown('<span class="tt-quiet">Trial accounts without a payment '
+                        'method are capped at roughly ten credits per day of AI '
+                        'Function usage. Every call here was made by a task, into '
+                        'a table, deduped on the finding key.</span>',
+                        unsafe_allow_html=True)
+        else:
+            empty_state("No Cortex calls recorded.",
+                        "AI.V_USAGE_SUMMARY aggregates the AI layer's own log.")
+
+    with h2:
+        panel("Parameters",
+              "Every threshold in the build. No magic numbers live in SQL.")
+        pr = rows("SELECT key, COALESCE(TO_VARCHAR(value_num), value_str) AS v, unit, "
+                  "description FROM REF.PARAMS ORDER BY key")
+        if pr:
+            html_table([{"k": r["KEY"], "v": r["V"], "u": r["UNIT"],
+                         "d": str(r["DESCRIPTION"])[:90]} for r in pr],
+                       [("k", "key"), ("v", "value"), ("u", "unit"),
+                        ("d", "what it does")])
+        else:
+            empty_state("No parameters.", "REF.PARAMS is seeded by 02_ref_seed.sql.")
+
+    # ------------------------------------------------------------------
+    # WHO PUBLISHES, AND HOW FAR EACH CLAIM GOT.
+    #
+    # The wallet and cluster are read from REF.PARAMS rather than hardcoded
+    # here, because the bridge is a separate process and the dashboard must
+    # not be able to disagree with it about who signs. The API KEY is
+    # deliberately absent from the warehouse — the host is recorded, the
+    # credential stays in .env beside the keypair. SiS has no outbound
+    # network, so nothing on this page queries Solana; every number here is
+    # the audit trail the bridge wrote back.
+    # ------------------------------------------------------------------
+    st.markdown("**On-chain attestations**")
+    chain = {r["KEY"]: r["VALUE_STR"] for r in rows(
+        "SELECT key, value_str FROM REF.PARAMS WHERE key LIKE 'solana%'")}
+    funnel = rows("""
+        SELECT status, COUNT(*) AS n
+        FROM ORACLE.PUBLISH_QUEUE GROUP BY status
+    """)
+    counts = {r["STATUS"]: int(r["N"] or 0) for r in funnel}
+    wallet = chain.get("solana_authority") or "not configured"
+    if chain:
+        st.markdown(f"""
 <div class="tt-card" style="font-size:12px;line-height:1.6">
   <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
     <div><span class="tt-metric-label">publishing authority</span><br>
       <a class="tt-mono" href="https://explorer.solana.com/address/{wallet}?cluster={chain.get('solana_cluster','devnet')}"
-         target="_blank">{wallet}</a></div>
+     target="_blank">{wallet}</a></div>
     <div><span class="tt-metric-label">cluster</span><br>
       <b>{chain.get('solana_cluster','—')}</b> via
       <span class="tt-mono">{chain.get('solana_rpc_host','—')}</span></div>
@@ -4781,67 +4822,67 @@ def _page_8():
   anywhere in Snowflake — a full dump of the warehouse yields no key material,
   which is checkable rather than asserted.</div>
 </div>""", unsafe_allow_html=True)
-        if PLOTLY and counts:
-            order = [("PENDING", "#D6D3D1"), ("SENT", S_YELLOW),
-                     ("CONFIRMED", "#15803D"), ("FAILED", "#B91C1C")]
-            present = [(s, h) for s, h in order if counts.get(s)]
-            fig = go.Figure()
-            for s, h in present:
-                fig.add_trace(go.Bar(
-                    x=[counts[s]], y=["queue"], orientation="h",
-                    marker=dict(color=h, line=dict(width=1, color=CARD)),
-                    hovertext=[f"{s}: {counts[s]} claims"], hoverinfo="text",
-                    showlegend=False))
-            fig.update_layout(barmode="stack",
-                              xaxis=dict(visible=False), yaxis=dict(visible=False))
-            chart(clean_axes(fig), H_STRIP)
-            st.markdown(" ".join(
-                f'<span class="tt-chip" style="background:{h}22;border-color:{h}">'
-                f'{s.lower()} <b>{counts[s]}</b></span>' for s, h in present),
-                unsafe_allow_html=True)
-        st.markdown('<span class="tt-quiet">Snowflake stages the claim; a Node '
-                    'bridge holds the key, signs and submits. <b>The keypair never '
-                    'touches Snowflake.</b> Publish the claim, never the data. '
-                    'The full ledger, with a link to every transaction on Solana '
-                    'Explorer, is on the <b>On Chain</b> page — this panel is '
-                    'here because the publish queue is part of the DAG\'s '
-                    'health, not because it is the interesting view of it.'
-                    '</span>', unsafe_allow_html=True)
-        recent = rows("""
-            SELECT publish_id, subject, syndrome_code, severity, status,
-                   latency_s, tx_signature, explorer_url
-            FROM ORACLE.V_PUBLISH_STATUS ORDER BY publish_id DESC LIMIT 8
-        """)
-        if recent:
-            trows = []
-            for r in recent:
-                sig, url = r.get("TX_SIGNATURE"), r.get("EXPLORER_URL")
-                link = (f'<a href="{url}" target="_blank" rel="noopener" '
-                        f'class="tt-mono">{str(sig)[:16]}&#8230;</a>'
-                        ) if url and sig else "—"
-                trows.append({
-                    "i": r["PUBLISH_ID"], "s": r["SUBJECT"], "c": r["SYNDROME_CODE"],
-                    "v": r["SEVERITY"], "st": r["STATUS"], "l": fmt(r["LATENCY_S"], 0),
-                    "t": link,
-                })
-            html_table(trows, [("i", "#"), ("s", "subject (hashed)"), ("c", "finding"),
-                               ("v", "sev"), ("st", "status"), ("l", "latency s"),
-                               ("t", "transaction")])
-        else:
-            empty_state("Nothing queued.",
-                        "ORACLE.T_ATTEST stages findings at severity ≥ 2; "
-                        "start the bridge with: npm run bridge")
+    if PLOTLY and counts:
+        order = [("PENDING", "#D6D3D1"), ("SENT", S_YELLOW),
+                 ("CONFIRMED", "#15803D"), ("FAILED", "#B91C1C")]
+        present = [(s, h) for s, h in order if counts.get(s)]
+        fig = go.Figure()
+        for s, h in present:
+            fig.add_trace(go.Bar(
+                x=[counts[s]], y=["queue"], orientation="h",
+                marker=dict(color=h, line=dict(width=1, color=CARD)),
+                hovertext=[f"{s}: {counts[s]} claims"], hoverinfo="text",
+                showlegend=False))
+        fig.update_layout(barmode="stack",
+                          xaxis=dict(visible=False), yaxis=dict(visible=False))
+        chart(clean_axes(fig), H_STRIP)
+        st.markdown(" ".join(
+            f'<span class="tt-chip" style="background:{h}22;border-color:{h}">'
+            f'{s.lower()} <b>{counts[s]}</b></span>' for s, h in present),
+            unsafe_allow_html=True)
+    st.markdown('<span class="tt-quiet">Snowflake stages the claim; a Node '
+                'bridge holds the key, signs and submits. <b>The keypair never '
+                'touches Snowflake.</b> Publish the claim, never the data. '
+                'The full ledger, with a link to every transaction on Solana '
+                'Explorer, is on the <b>On Chain</b> page — this panel is '
+                'here because the publish queue is part of the DAG\'s '
+                'health, not because it is the interesting view of it.'
+                '</span>', unsafe_allow_html=True)
+    recent = rows("""
+        SELECT publish_id, subject, syndrome_code, severity, status,
+               latency_s, tx_signature, explorer_url
+        FROM ORACLE.V_PUBLISH_STATUS ORDER BY publish_id DESC LIMIT 8
+    """)
+    if recent:
+        trows = []
+        for r in recent:
+            sig, url = r.get("TX_SIGNATURE"), r.get("EXPLORER_URL")
+            link = (f'<a href="{url}" target="_blank" rel="noopener" '
+                    f'class="tt-mono">{str(sig)[:16]}&#8230;</a>'
+                    ) if url and sig else "—"
+            trows.append({
+                "i": r["PUBLISH_ID"], "s": r["SUBJECT"], "c": r["SYNDROME_CODE"],
+                "v": r["SEVERITY"], "st": r["STATUS"], "l": fmt(r["LATENCY_S"], 0),
+                "t": link,
+            })
+        html_table(trows, [("i", "#"), ("s", "subject (hashed)"), ("c", "finding"),
+                           ("v", "sev"), ("st", "status"), ("l", "latency s"),
+                           ("t", "transaction")])
+    else:
+        empty_state("Nothing queued.",
+                    "ORACLE.T_ATTEST stages findings at severity ≥ 2; "
+                    "start the bridge with: npm run bridge")
 
-        st.markdown("**Build log**")
-        bl = rows("SELECT script_name, status, statements_ok, statements_ko, finished_at "
-                  "FROM REF.BUILD_LOG WHERE script_name <> 'T_ROOT' "
-                  "ORDER BY finished_at DESC LIMIT 15")
-        if bl:
-            html_table([{"s": r["SCRIPT_NAME"], "t": r["STATUS"],
-                         "o": fmt(r["STATEMENTS_OK"], 0), "k": fmt(r["STATEMENTS_KO"], 0),
-                         "w": str(r["FINISHED_AT"])[:19]} for r in bl],
-                       [("s", "script"), ("t", "status"), ("o", "ok"),
-                        ("k", "failed"), ("w", "finished")])
+    st.markdown("**Build log**")
+    bl = rows("SELECT script_name, status, statements_ok, statements_ko, finished_at "
+              "FROM REF.BUILD_LOG WHERE script_name <> 'T_ROOT' "
+              "ORDER BY finished_at DESC LIMIT 15")
+    if bl:
+        html_table([{"s": r["SCRIPT_NAME"], "t": r["STATUS"],
+                     "o": fmt(r["STATEMENTS_OK"], 0), "k": fmt(r["STATEMENTS_KO"], 0),
+                     "w": str(r["FINISHED_AT"])[:19]} for r in bl],
+                   [("s", "script"), ("t", "status"), ("o", "ok"),
+                    ("k", "failed"), ("w", "finished")])
 
 # ---------------------------------------------------------------------------
 if st.session_state.get("_errors"):
