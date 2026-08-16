@@ -50,6 +50,7 @@ batched into a table by a task.
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from decimal import Decimal
 
@@ -2117,6 +2118,16 @@ def _page_2():
             ridge = [{"state": b["STATE"], "secs": float(b["BOUT_SECONDS"])}
                      for b in bouts if (b["BOUT_SECONDS"] or 0) >= 1]
             if len({r["state"] for r in ridge}) > 1:
+                # THE EXTENT IS MEASURED, NOT ASSUMED. This was a hard-coded
+                # [0, 3.8] — four decades, up to about 1h45 — chosen to be
+                # safely wide. On a real dog the longest bout is nearer three
+                # minutes, so every ridge was crushed into the left 55% of the
+                # chart with half the axis empty, and a KDE evaluated over an
+                # empty range is flatter as well as smaller. Rounded up to the
+                # next fifth of a decade so the tallest ridge is not clipped by
+                # its own kernel's tail.
+                top = max(r["secs"] for r in ridge)
+                hi = max(1.4, math.ceil((math.log10(top) + 0.25) * 5) / 5)
                 st.markdown("**How long a bout of each behaviour actually lasts**")
                 st.markdown(
                     '<span class="tt-quiet">One kernel density per state over '
@@ -2133,20 +2144,24 @@ def _page_2():
                     alt.Chart(avals(ridge))
                     .transform_calculate(ls="log(datum.secs)/log(10)")
                     .transform_density("ls", groupby=["state"], as_=["ls", "d"],
-                                       extent=[0, 3.8], steps=110, counts=False)
+                                       extent=[0, hi], steps=140, counts=False)
                     .mark_area(interpolate="monotone", fillOpacity=0.82,
                                stroke=CARD, strokeWidth=0.8)
                     .encode(
                         x=alt.X("ls:Q", title="bout length",
+                                scale=alt.Scale(domain=[0, hi], nice=False),
                                 axis=alt.Axis(
-                                    values=[0, 1, 2, 3],
+                                    values=[0, 1, 2, 3, 4],
                                     # Ticks are decades, labelled in units a
                                     # reader has intuitions about. "2" means
                                     # nothing; "1m 40s" is a length of time.
+                                    # Values past the domain are dropped by
+                                    # the renderer, so listing five is safe.
                                     labelExpr="datum.value == 0 ? '1s' : "
                                               "datum.value == 1 ? '10s' : "
                                               "datum.value == 2 ? '1m 40s' : "
-                                              "'16m 40s'")),
+                                              "datum.value == 3 ? '16m 40s' : "
+                                              "'2h 46m'")),
                         y=alt.Y("d:Q", title=None, stack=None,
                                 axis=None, scale=alt.Scale(range=[46, 0])),
                         row=alt.Row("state:N", title=None, sort=order,
