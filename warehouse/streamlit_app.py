@@ -959,6 +959,231 @@ def chart(fig, height: int = H_MD) -> None:
 
 
 # ===========================================================================
+# THE CHART LANGUAGE — EVILCHARTS, PORTED RATHER THAN INSTALLED.
+#
+# evilcharts.com is React, on Recharts or Apache ECharts. It cannot be installed
+# here for exactly the reason st-chat could not be (hazard 6 at the top of this
+# file): Streamlit in Snowflake cannot serve a custom component's frontend
+# bundle, and there is no outbound network for a CDN. So its nine components are
+# rebuilt below on the renderers this app already ships, and what is being
+# copied is the DESIGN — gradient fills that fade to nothing at the baseline, a
+# glow under the stroke, rounded bar caps, a dotted grid instead of ruled lines,
+# a faint track behind each bar showing the space it could have filled.
+#
+# THE PALETTE IS NOT PART OF THE PORT. Every colour still comes from the
+# CVD-validated eight at the top of this file, on the same warm surface. A
+# gradient here is a ramp in ALPHA of one validated hue, never a blend between
+# two hues, because a two-hue ramp invents intermediate colours that no longer
+# carry the separation those eight were chosen for.
+#
+# ---------------------------------------------------------------------------
+# EVERY EFFECT IS CAPABILITY-PROBED, AND THAT IS NOT DEFENSIVE PROGRAMMING FOR
+# ITS OWN SAKE.
+#
+# SiS ships Altair 4, which means an old Streamlit, which means the plotly the
+# conda solve lands on is not knowable from a development machine. The three
+# properties this layer wants are all recent:
+#
+#     Scatter.fillgradient    plotly >= 5.23
+#     layout.barcornerradius  plotly >= 5.19
+#     axis.griddash           plotly >= 5.5
+#
+# An unknown property is not ignored by plotly — it raises ValueError at figure
+# CONSTRUCTION, which would take down the page rather than degrade the chart.
+# Probing by building a throwaway figure at import is the only way to ask, and
+# it costs microseconds once. Each probe has a defined fallback that still looks
+# deliberate: a flat tint instead of a ramp, square caps instead of round, a
+# faint solid rule instead of a dotted one. Nothing disappears and nothing
+# raises.
+# ===========================================================================
+def _supported(build) -> bool:
+    """True if plotly accepts this construction on whatever version is here."""
+    if not PLOTLY:
+        return False
+    try:
+        build()
+        return True
+    except Exception:      # ValueError today; anything at all is still a no
+        return False
+
+
+HAS_FILLGRAD = _supported(lambda: go.Scatter(
+    x=[0, 1], y=[0, 1], fill="tozeroy",
+    fillgradient=dict(type="vertical",
+                      colorscale=[(0, "rgba(0,0,0,0)"), (1, "rgba(0,0,0,1)")])))
+HAS_BARRADIUS = _supported(lambda: go.Figure().update_layout(barcornerradius=6))
+HAS_GRIDDASH = _supported(lambda: go.Figure().update_xaxes(griddash="dot"))
+
+# How far a fill is allowed to get. 0.34 at the top of an area and nothing at
+# the baseline: enough to read as a body of colour, never enough to compete with
+# the stroke that carries the actual value.
+FILL_TOP = 0.34
+GLOW_PASSES = 3
+
+
+def gfill(colour: str, top: float = FILL_TOP):
+    """A vertical alpha ramp of one hue, or None if this plotly cannot.
+
+    Returned as a kwargs dict so a caller can splat it and get either the
+    gradient or the flat-tint fallback without branching:
+
+        fig.add_trace(go.Scatter(..., **gfill(S_BLUE)))
+    """
+    if HAS_FILLGRAD:
+        return dict(fillgradient=dict(
+            type="vertical",
+            colorscale=[(0.0, alpha(colour, 0.0)),
+                        (0.55, alpha(colour, top * 0.42)),
+                        (1.0, alpha(colour, top))]))
+    # No ramp available. A flat tint at a bit under half the peak reads as the
+    # same weight of colour overall, which is what keeps a page of these
+    # looking consistent whichever branch a given deployment took.
+    return dict(fillcolor=alpha(colour, top * 0.45))
+
+
+def glow(fig, x, y, colour: str, *, width: float = 2.2,
+         passes: int = GLOW_PASSES, shape: str = "spline", row=None, col=None):
+    """The same path drawn underneath itself, wider and fainter each time.
+
+    SVG has a blur filter and plotly exposes none of it, so a glow has to be
+    built out of the one primitive available: more strokes. Three passes at
+    3x/6x/9x the width and a twelfth of the opacity is indistinguishable from a
+    soft shadow at screen resolution and costs three lines in the spec.
+
+    Drawn BEFORE the real stroke by every caller, because these are additive
+    and a glow painted on top of its own line greys it out.
+    """
+    for i in range(passes, 0, -1):
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="lines", hoverinfo="skip", showlegend=False,
+            line=dict(color=alpha(colour, 0.10 - 0.022 * (i - 1)),
+                      width=width * (1 + 3 * i), shape=shape)),
+            **({"row": row, "col": col} if row is not None else {}))
+    return fig
+
+
+def evil_area(fig, x, y, colour: str, *, name: str = "", text=None,
+              width: float = 2.1, shape: str = "spline", fill: str = "tozeroy",
+              show_glow: bool = True, cap: bool = False, top: float = FILL_TOP):
+    """EvilCharts' area chart: gradient body, glowing stroke, optional end cap.
+
+    The workhorse of this rebuild. `cap` puts a single filled dot on the last
+    point — their charts all do it, and it is genuinely useful here because it
+    marks where a series actually ends when several are overlaid.
+    """
+    if show_glow:
+        glow(fig, x, y, colour, width=width, shape=shape)
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="lines", name=name, fill=fill,
+        line=dict(color=colour, width=width, shape=shape),
+        showlegend=bool(name) and bool(fig.layout.showlegend),
+        hovertext=text, hoverinfo="text" if text is not None else "skip",
+        **gfill(colour, top)))
+    if cap and len(x):
+        fig.add_trace(go.Scatter(
+            x=[x[-1]], y=[y[-1]], mode="markers", showlegend=False,
+            hoverinfo="skip",
+            marker=dict(color=colour, size=7,
+                        line=dict(color=CARD, width=2))))
+    return fig
+
+
+def evil_bar(fig, cats, vals, colours, *, text=None, horizontal: bool = True,
+             track: bool = True, width: float = 0.62):
+    """EvilCharts' bar chart: rounded caps over a faint full-length track.
+
+    THE TRACK IS THE POINT, not decoration. A bare bar tells you a value; a bar
+    in a track tells you the value AND the headroom, which is the difference
+    between 'TROT: 7s' and 'TROT: 7s of a possible 22'. It is drawn first, at
+    the longest bar's length, so every row is the same visual width.
+    """
+    if track and len(vals):
+        span = max([v for v in vals if v is not None] or [0]) * 1.02
+        bar = dict(y=cats, x=[span] * len(cats), orientation="h") if horizontal \
+            else dict(x=cats, y=[span] * len(cats))
+        fig.add_trace(go.Bar(
+            **bar, marker=dict(color=GRID, line=dict(width=0)),
+            width=width, hoverinfo="skip", showlegend=False))
+    bar = dict(y=cats, x=vals, orientation="h") if horizontal \
+        else dict(x=cats, y=vals)
+    fig.add_trace(go.Bar(
+        **bar, width=width,
+        marker=dict(color=colours, line=dict(width=0)),
+        hovertext=text, hoverinfo="text" if text is not None else "skip",
+        showlegend=False))
+    # overlay, so the track sits behind rather than stacking end to end
+    fig.update_layout(barmode="overlay", bargap=0.34)
+    if HAS_BARRADIUS:
+        fig.update_layout(barcornerradius=4)
+    return fig
+
+
+def evil_axes(fig, *, y_zero_line: bool = True, dotted: str = "y"):
+    """clean_axes, plus the dotted grid and without the boxed-in axis lines.
+
+    WRAPS RATHER THAN REPLACES clean_axes. That function encodes the spec's
+    no-chart-junk rules and the opt-in legend behaviour that took a bug to get
+    right; this only changes how the remaining lines are drawn. `dotted` picks
+    which axes get a grid — "y" for almost everything, "xy" for a scatter where
+    both readings matter, "" for a ribbon.
+    """
+    clean_axes(fig, y_zero_line=y_zero_line)
+    dash = dict(griddash="dot") if HAS_GRIDDASH else {}
+    # A dotted grid can afford to be darker than a ruled one — it is mostly
+    # gaps — and it has to be, or it vanishes on the warm surface.
+    axis = dict(showgrid=True, gridcolor=BORDER, gridwidth=1,
+                linecolor="rgba(0,0,0,0)", ticks="", **dash)
+    if "x" in dotted:
+        fig.update_xaxes(**axis)
+    if "y" in dotted:
+        fig.update_yaxes(**axis)
+    # The frame goes. EvilCharts' charts float on their card, and the axis
+    # domain line is the single thing that most makes a plotly chart look like
+    # a plotly default.
+    fig.update_xaxes(showline=False)
+    fig.update_yaxes(showline=False, zerolinecolor=BORDER)
+    return fig
+
+
+def scene3d(fig, xt: str, yt: str, zt: str, *, eye=(1.55, 1.45, 0.85)):
+    """One 3D scene style, so nine scenes across the app look like one system.
+
+    Pale walls rather than none: a 3D scatter with no floor has no depth cue at
+    all, and the reader cannot tell a point that is far away from one that is
+    low. Pale rather than default, because plotly's stock scene is a grey box
+    with three heavy panes that dominates any colour inside it.
+    """
+    ax = dict(backgroundcolor=CARD, gridcolor=BORDER, zerolinecolor=BORDER,
+              showbackground=True, titlefont=dict(size=10, color=INK_2),
+              tickfont=dict(size=9, color=INK_2), showspikes=False)
+    fig.update_layout(
+        paper_bgcolor=CARD, plot_bgcolor=CARD,
+        font=dict(family=FONT_CHART, size=11, color=INK_2),
+        margin=dict(l=0, r=0, t=28, b=0),
+        hoverlabel=dict(bgcolor=CARD, bordercolor=BORDER,
+                        font=dict(color=INK, size=11)),
+        scene=dict(
+            xaxis=dict(title=xt, **ax),
+            yaxis=dict(title=yt, **ax),
+            zaxis=dict(title=zt, **ax),
+            camera=dict(eye=dict(x=eye[0], y=eye[1], z=eye[2])),
+            aspectmode="cube"))
+    return fig
+
+
+def chart3d(fig, height: int = H_LG) -> None:
+    """Render a 3D scene. Separate from chart() because the mode bar STAYS.
+
+    A rotatable scene the reader cannot discover is rotatable is just a bad 2D
+    chart, and the mode bar is the only affordance plotly offers.
+    """
+    fig.update_layout(height=height)
+    st.plotly_chart(fig, use_container_width=True,
+                    config={"displayModeBar": True, "displaylogo": False,
+                            "modeBarButtonsToRemove": ["toImage"]})
+
+
+# ===========================================================================
 # THREE RENDERERS, BECAUSE THEY ARE GOOD AT THREE DIFFERENT THINGS
 #
 # plotly  — 3D, and only 3D. It is the one of the three that can put a point
