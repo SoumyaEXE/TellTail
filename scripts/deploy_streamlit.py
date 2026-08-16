@@ -43,12 +43,23 @@ def main() -> int:
     load_env()
     app = WAREHOUSE_DIR / "streamlit_app.py"
     envyml = WAREHOUSE_DIR / "environment.yml"
+    font = WAREHOUSE_DIR / "tt_font.py"
 
     if not app.exists():
         die(f"{app} not found")
     if not envyml.exists():
         die(f"{envyml} not found. Streamlit in Snowflake needs it next to the app "
             f"or plotly will ModuleNotFoundError in SiS only.")
+
+    # WARN RATHER THAN DIE. tt_font.py carries the embedded Satoshi woff2, and
+    # the app imports it inside a try/except precisely so a stage without it
+    # renders in the fallback stack instead of failing. That makes a missing
+    # font a cosmetic regression, not a broken deploy — but it is invisible in
+    # Snowsight, so it gets said out loud here rather than discovered later.
+    if not font.exists():
+        warn(f"{font.name} not found — the app will deploy and render in the "
+             f"Geist/Inter fallback rather than Satoshi. Rebuild it with: "
+             f"python scripts/fetch_satoshi.py")
 
     # A `python=` pin in environment.yml deploys cleanly and then fails the app
     # at load with 'Packages not found: python==3.11' — a blank error page, no
@@ -87,14 +98,15 @@ def main() -> int:
     try:
         header("Uploading to " + STAGE)
         with conn.cursor() as cur:
-            for f in (app, envyml):
+            staged = [f for f in (app, envyml, font) if f.exists()]
+            for f in staged:
                 cur.execute(
                     f"PUT 'file://{f.resolve().as_posix()}' @{STAGE} "
                     f"AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
                 )
                 for r in cur.fetchall():
                     print(f"    {r[0]:<24} {r[6]}")
-        ok("app + environment.yml staged")
+        ok(", ".join(f.name for f in staged) + " staged")
 
         header(f"Creating STREAMLIT {db}.{args.schema}.{args.name}")
         with conn.cursor() as cur:

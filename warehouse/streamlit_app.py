@@ -57,6 +57,36 @@ from decimal import Decimal
 import streamlit as st
 
 # ---------------------------------------------------------------------------
+# THE TYPEFACE, AND WHY IT IS AN IMPORT RATHER THAN A FONT-FAMILY.
+#
+# `font-family: Satoshi` is a no-op in SiS. There is no outbound network, so the
+# browser cannot fetch the face, and CSS has no way to report that — it silently
+# falls through to the next name in the stack. The app looked like it had a
+# custom font for as long as it took to open it on a machine that did not
+# already have one installed.
+#
+# tt_font ships the woff2 bytes for three weights as base64 `data:` URIs, the
+# same trick as the breed photographs (hazard 5). It is a separate staged file
+# because 102 KB of base64 in the middle of this one would bury it.
+#
+# GUARDED, BECAUSE A MISSING FILE MUST NOT BE A BLANK APP. If the stage somehow
+# has streamlit_app.py without tt_font.py, this falls back to the stack the app
+# used before and every rule below keeps working — a plainer dashboard, not a
+# broken one.
+# ---------------------------------------------------------------------------
+try:
+    from tt_font import FACE_CSS as FONT_CSS, STACK as FONT
+except ModuleNotFoundError:
+    FONT_CSS = ""
+    FONT = 'Geist, Inter, -apple-system, "Segoe UI", sans-serif'
+
+# The name alone, for the renderers that take a font family rather than a CSS
+# declaration. plotly, vega and bokeh all want a bare list and none of them
+# accept the quoted "Segoe UI" entry, which they pass through to SVG unescaped.
+FONT_CHART = "Satoshi, Geist, Inter, sans-serif"
+MONO = '"Geist Mono", ui-monospace, "SF Mono", Consolas, monospace'
+
+# ---------------------------------------------------------------------------
 # design system  (spec section 15: clinical register, one accent, no chart junk)
 # ---------------------------------------------------------------------------
 SURFACE = "#FAFAF9"
@@ -162,13 +192,20 @@ st.set_page_config(page_title="TELLTAIL", page_icon="🐕", layout="wide")
 
 st.markdown(f"""
 <style>
+  {FONT_CSS}
   .stApp {{ background: {SURFACE}; }}
-  html, body, [class*="css"] {{
-      font-family: Geist, Inter, -apple-system, "Segoe UI", sans-serif;
+  /* Satoshi has to be asserted rather than inherited. Streamlit sets its own
+     font on a dozen generated class names that change between builds, and any
+     one of them left unstyled shows up as a single control in the wrong face,
+     which reads as a rendering bug rather than a design choice. */
+  html, body, [class*="css"], .stApp, button, input, select, textarea,
+  [class^="st-"], [class*=" st-"] {{
+      font-family: {FONT};
       font-variant-numeric: tabular-nums;
-      color: {INK};
   }}
-  h1, h2, h3, h4 {{ color: {INK}; letter-spacing: -0.01em; }}
+  html, body, [class*="css"] {{ color: {INK}; }}
+  h1, h2, h3, h4 {{ color: {INK}; letter-spacing: -0.02em;
+      font-family: {FONT}; font-weight: 700; }}
   .tt-card {{
       background: {CARD}; border: 1px solid {BORDER}; border-radius: 6px;
       padding: 12px 14px; margin-bottom: 10px;
@@ -257,8 +294,7 @@ st.markdown(f"""
       font-size: 11px; font-weight: 600; border: 1px solid {BORDER}; }}
   .tt-badge {{ display:inline-block; padding: 2px 9px; border-radius: 3px;
       font-size: 11px; font-weight: 700; color: #fff; }}
-  .tt-mono {{ font-family: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace;
-      font-size: 12px; }}
+  .tt-mono {{ font-family: {MONO}; font-size: 12px; }}
   .tt-caveat {{ background: #FEF3C7; border-left: 3px solid {ACCENT};
       padding: 8px 12px; font-size: 12px; color: #78350F; margin: 8px 0; }}
   .tt-quiet {{ color: {INK_2}; font-size: 12px; }}
@@ -267,8 +303,7 @@ st.markdown(f"""
      of the chart rather than as the next paragraph. */
   .tt-renderer {{ margin: -6px 0 14px; font-size: 11px; color: {INK_2};
       display: flex; align-items: baseline; gap: 7px; line-height: 1.45; }}
-  .tt-renderer-tag {{ flex: none; font-family: "Geist Mono", ui-monospace,
-      Consolas, monospace; font-size: 9.5px; letter-spacing: .07em;
+  .tt-renderer-tag {{ flex: none; font-family: {MONO}; font-size: 9.5px; letter-spacing: .07em;
       text-transform: uppercase; color: {INK_2}; background: {GRID};
       border: 1px solid {BORDER}; border-radius: 3px; padding: 1px 5px; }}
   /* A bokeh document lives in its own iframe, which paints white and squares
@@ -648,7 +683,7 @@ def sensor_anatomy_svg(neck_hz=100, back_hz=100) -> str:
         'vertebrae and the harness sensor on the thoracic vertebrae" '
         'style="width:100%;height:auto;display:block">'
         + _DOG_SKELETON_G
-        + f'''<g font-family="Geist, Inter, sans-serif">
+        + f'''<g font-family="{FONT_CHART}">
   <path d="M521,220 Q604,163 688,223" fill="none" stroke="{INK}"
         stroke-width="2.5" stroke-dasharray="8 7"/>
 
@@ -882,7 +917,7 @@ def clean_axes(fig, *, y_zero_line: bool = True):
     legend = bool(fig.layout.showlegend)
     fig.update_layout(
         paper_bgcolor=CARD, plot_bgcolor=CARD,
-        font=dict(family="Geist, Inter, sans-serif", size=11, color=INK_2),
+        font=dict(family=FONT_CHART, size=11, color=INK_2),
         # a legend parked below the plot needs floor to stand on, or plotly
         # crops it to a row of half-height swatches
         margin=dict(l=8, r=8, t=28, b=46 if legend else 8),
@@ -991,8 +1026,8 @@ except ModuleNotFoundError:
 # get a bar chart of forty-five identical bars. Explicit :Q/:N/:T on every
 # field, always.
 # ---------------------------------------------------------------------------
-AXIS_CFG = dict(labelFont="Geist, Inter, sans-serif", labelFontSize=10,
-                labelColor=INK_2, titleFont="Geist, Inter, sans-serif",
+AXIS_CFG = dict(labelFont=FONT_CHART, labelFontSize=10,
+                labelColor=INK_2, titleFont=FONT_CHART,
                 titleFontSize=10, titleColor=INK_2, titleFontWeight="normal",
                 domainColor=BORDER, tickColor=BORDER, grid=False)
 
@@ -1004,19 +1039,19 @@ def tt_alt(chart_obj, *, grid_y: bool = False):
             .configure_axisX(**AXIS_CFG)
             .configure_axisY(**dict(AXIS_CFG, grid=grid_y, gridColor=GRID,
                                     domain=False))
-            .configure_legend(labelFont="Geist, Inter, sans-serif",
+            .configure_legend(labelFont=FONT_CHART,
                               labelFontSize=10, labelColor=INK_2,
-                              titleFont="Geist, Inter, sans-serif",
+                              titleFont=FONT_CHART,
                               titleFontSize=10, titleColor=INK_2,
                               titleFontWeight="normal", symbolType="circle",
                               symbolStrokeWidth=0, offset=8)
-            .configure_title(font="Geist, Inter, sans-serif", fontSize=11,
+            .configure_title(font=FONT_CHART, fontSize=11,
                              color=INK_2, fontWeight="normal", anchor="start",
                              offset=10)
             .configure_range(category=list(SYMBOL_COLOURS))
             .configure_concat(spacing=26)
             .configure_facet(spacing=14)
-            .configure_header(labelFont="Geist, Inter, sans-serif",
+            .configure_header(labelFont=FONT_CHART,
                               labelFontSize=10, labelColor=INK_2,
                               titleFontSize=10, titleColor=INK_2))
 
@@ -1113,17 +1148,17 @@ BK_THEME = {
                  "minor_tick_line_color": None,
                  "axis_label_text_color": INK_2, "axis_label_text_font_size": "10px",
                  "axis_label_text_font_style": "normal",
-                 "axis_label_text_font": "Geist, Inter, sans-serif",
+                 "axis_label_text_font": FONT_CHART,
                  "major_label_text_color": INK_2,
                  "major_label_text_font_size": "10px",
-                 "major_label_text_font": "Geist, Inter, sans-serif"},
+                 "major_label_text_font": FONT_CHART},
         "Grid": {"grid_line_color": None},
         "Title": {"text_color": INK_2, "text_font_size": "11px",
                   "text_font_style": "normal",
-                  "text_font": "Geist, Inter, sans-serif"},
+                  "text_font": FONT_CHART},
         "Legend": {"border_line_color": None, "background_fill_alpha": 0.0,
                    "label_text_color": INK_2, "label_text_font_size": "10px",
-                   "label_text_font": "Geist, Inter, sans-serif",
+                   "label_text_font": FONT_CHART,
                    "spacing": 2, "padding": 4},
         "Toolbar": {"logo": None},
     }
@@ -1896,7 +1931,7 @@ def _page_1():
                     camera=dict(eye=dict(x=1.5, y=1.5, z=0.9))),
                 paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=False,
                 margin=dict(l=0, r=0, t=4, b=0), height=H_LG,
-                font=dict(family="Geist, Inter, sans-serif", size=11,
+                font=dict(family=FONT_CHART, size=11,
                           color=INK_2))
             st.plotly_chart(fig, use_container_width=True,
                             config={"displayModeBar": False})
@@ -1997,7 +2032,7 @@ def _page_1():
                         camera=dict(eye=dict(x=1.75, y=-1.5, z=0.95))),
                     paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=False,
                     margin=dict(l=0, r=0, t=4, b=0), height=H_LG,
-                    font=dict(family="Geist, Inter, sans-serif", size=11,
+                    font=dict(family=FONT_CHART, size=11,
                               color=INK_2))
                 st.plotly_chart(fig, use_container_width=True,
                                 config={"displayModeBar": False})
@@ -2697,7 +2732,7 @@ def _page_3():
                 paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=True,
                 legend=dict(itemsizing="constant", font=dict(size=10)),
                 margin=dict(l=0, r=0, t=4, b=0), height=H_LG,
-                font=dict(family="Geist, Inter, sans-serif", size=11,
+                font=dict(family=FONT_CHART, size=11,
                           color=INK_2))
             st.plotly_chart(fig, use_container_width=True,
                             config={"displayModeBar": False})
@@ -3332,7 +3367,7 @@ def _page_6():
             paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=True,
             legend=dict(itemsizing="constant", font=dict(size=10)),
             margin=dict(l=0, r=0, t=4, b=0),
-            font=dict(family="Geist, Inter, sans-serif", size=11, color=INK_2))
+            font=dict(family=FONT_CHART, size=11, color=INK_2))
         fig.update_layout(height=H_LG)
         st.plotly_chart(fig, use_container_width=True,
                         config={"displayModeBar": False})
