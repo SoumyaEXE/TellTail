@@ -1164,9 +1164,18 @@ def scene3d(fig, xt: str, yt: str, zt: str, *, eye=(1.55, 1.45, 0.85)):
     low. Pale rather than default, because plotly's stock scene is a grey box
     with three heavy panes that dominates any colour inside it.
     """
+    # NOT `titlefont=`. That spelling was removed in plotly 6 and raises a
+    # ValueError on the property path rather than being ignored, which would
+    # take out every 3D scene in the app on a current plotly while working
+    # perfectly on an old one. `title=dict(text=..., font=...)` is accepted by
+    # both, which is the only reason to write it the long way.
     ax = dict(backgroundcolor=CARD, gridcolor=BORDER, zerolinecolor=BORDER,
-              showbackground=True, titlefont=dict(size=10, color=INK_2),
-              tickfont=dict(size=9, color=INK_2), showspikes=False)
+              showbackground=True, tickfont=dict(size=9, color=INK_2),
+              showspikes=False)
+
+    def _axis(title: str) -> dict:
+        return dict(title=dict(text=title, font=dict(size=10, color=INK_2)), **ax)
+
     fig.update_layout(
         paper_bgcolor=CARD, plot_bgcolor=CARD,
         font=dict(family=FONT_CHART, size=11, color=INK_2),
@@ -1174,9 +1183,7 @@ def scene3d(fig, xt: str, yt: str, zt: str, *, eye=(1.55, 1.45, 0.85)):
         hoverlabel=dict(bgcolor=CARD, bordercolor=BORDER,
                         font=dict(color=INK, size=11)),
         scene=dict(
-            xaxis=dict(title=xt, **ax),
-            yaxis=dict(title=yt, **ax),
-            zaxis=dict(title=zt, **ax),
+            xaxis=_axis(xt), yaxis=_axis(yt), zaxis=_axis(zt),
             camera=dict(eye=dict(x=eye[0], y=eye[1], z=eye[2])),
             aspectmode="cube"))
     return fig
