@@ -1031,6 +1031,46 @@ def avals(data: list[dict]):
     return alt.Data(values=data)
 
 
+# ---------------------------------------------------------------------------
+# ALTAIR 4 / 5 SELECTION COMPATIBILITY.
+#
+# THIS IS A SEVENTH SiS HAZARD and it took a whole tab down. Selections were
+# renamed wholesale in Altair 5 — `selection_point` for `selection_multi`,
+# `.add_params` for `.add_selection` — and Streamlit in Snowflake pins whatever
+# Altair the Streamlit it ships depends on, which is 4.x. Written in the 5
+# spelling, the cross-filter on Syndromes raised
+#
+#     AttributeError: module 'altair' has no attribute 'selection_point'
+#
+# at module scope inside the page function, so the tab rendered its heading and
+# then a red traceback instead of everything below it. It reproduces nowhere
+# locally, because a development machine has Altair 5 or 6.
+#
+# The shim resolves the spelling at call time rather than at import, so the same
+# file is correct on 4, 5 and 6. `selection_interval` needs no shim — the name
+# survived the rename unchanged, which is exactly why the brush on the same
+# chart worked while the click selection did not.
+# ---------------------------------------------------------------------------
+def alt_point(*, fields: list[str], name: str, toggle=None):
+    """A click/tap selection over `fields`, on whichever Altair is installed."""
+    if hasattr(alt, "selection_point"):                       # 5, 6
+        return alt.selection_point(fields=fields, name=name, toggle=toggle)
+    return alt.selection_multi(fields=fields, name=name, toggle=toggle)  # 4
+
+
+def alt_bind(chart_obj, selection):
+    """Attach a selection to a chart, on whichever Altair is installed.
+
+    add_params is 5+; add_selection is 4 and warns loudly on 5 before being
+    removed in 6. getattr order matters: prefer the modern name so a future
+    build that drops the old one keeps working.
+    """
+    binder = getattr(chart_obj, "add_params", None)
+    if binder is None:
+        binder = chart_obj.add_selection
+    return binder(selection)
+
+
 def altair_chart(chart_obj, *, container: bool = True) -> None:
     """Render, and survive Streamlit renaming the width argument.
 
@@ -1732,9 +1772,17 @@ def _page_1():
             nav.xgrid.grid_line_color = None
             panels.append(nav)
 
+            # merge_tools=False keeps each panel's own toolbar (autohidden, so
+            # they appear on hover); toolbar_location=None suppresses only the
+            # merged one the grid would otherwise add above everything.
             grid = bk_gridplot([[p] for p in panels], sizing_mode="stretch_width",
                                toolbar_location=None, merge_tools=False)
-            bokeh_panel(grid, sum(p.height for p in panels) + 30)
+            # Bokeh's `height` is the OUTER height of a figure — title, axis and
+            # label included — so the sum is exact and the slack is only for the
+            # grid's own row spacing. Erring high costs a few px of white space;
+            # erring low silently cuts the scrubber off the bottom, and it is
+            # the control the rest of the view depends on.
+            bokeh_panel(grid, sum(p.height for p in panels) + 36)
             renderer_note(
                 "bokeh",
                 f"One document, {len(panels) - 1} panels, one shared x axis. Drag "
@@ -2174,7 +2222,27 @@ def _page_2():
                                           range=[palette.get(s, "#D6D3D1")
                                                  for s in order])),
                         tooltip=[alt.Tooltip("state:N", title="state")])
-                    .properties(width=880, height=30))
+                    .properties(width=880, height=30)
+                    # EVERY ROW GETS ITS OWN y SCALE, AND HALF THIS CHART WAS
+                    # A FLAT LINE WITHOUT IT.
+                    #
+                    # A faceted chart shares its scales across rows by default,
+                    # and transform_density(counts=False) normalises each
+                    # state's kernel density to unit AREA. So a state whose
+                    # bouts spread over two decades — SNIFF, WALK, STAND, REST,
+                    # SIT — has to be low to integrate to 1, while a state that
+                    # is always about the same length — SHAKE, PAUSE, CIRCLE —
+                    # is a tall narrow spike. Share one y scale between them and
+                    # the spike sets the domain, which drew seven of the
+                    # fourteen ridges as a horizontal rule at zero. They were
+                    # not empty; they were 3% as tall as their loudest
+                    # neighbour.
+                    #
+                    # Independent y is the right answer rather than a cosmetic
+                    # one, because the y axis here IS NOT SHOWN (axis=None) and
+                    # carries no reading. The chart is a comparison of SHAPES
+                    # along x. Height was never the variable.
+                    .resolve_scale(y="independent"))
                 # tt_alt's configure_facet spacing is 14 — correct everywhere
                 # else and wrong here, where the whole form depends on the rows
                 # overlapping. Overriding after it wins, because configure_*
@@ -2476,8 +2544,8 @@ def _page_3():
 
             adata = avals(slim)
             brush = alt.selection_interval(encodings=["x", "y"], name="brush")
-            pick = alt.selection_point(fields=["code"], name="pick",
-                                       toggle="event.shiftKey")
+            pick = alt_point(fields=["code"], name="pick",
+                             toggle="event.shiftKey")
             colour = alt.Color("code:N", title="syndrome",
                                scale=alt.Scale(domain=codes,
                                                range=[cmap[c] for c in codes]),
@@ -2526,9 +2594,9 @@ def _page_3():
                              alt.Tooltip("confidence:Q", title="confidence",
                                          format=".3f"),
                              alt.Tooltip("severity:Q", title="severity")])
-                .add_params(brush)
                 .transform_filter(pick)
                 .properties(width=W, height=330))
+            scatter = alt_bind(scatter, brush)
 
             def counted(field: str, title: str, axis_title: str, height: int,
                         sort=None, colour_by=None):
@@ -2555,7 +2623,7 @@ def _page_3():
                         .transform_filter(brush))
                 layered = alt.layer(ghost, live, title=title).properties(
                     width=WR, height=height)
-                return layered.add_params(pick) if colour_by is not None else layered
+                return alt_bind(layered, pick) if colour_by is not None else layered
 
             # NOT `by_code` — that name is the {code: count} dict this page
             # already built for the metric strip, and rebinding it to a chart
