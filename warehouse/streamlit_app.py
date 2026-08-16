@@ -210,6 +210,17 @@ st.markdown(f"""
       background: {CARD}; border: 1px solid {BORDER}; border-radius: 6px;
       padding: 12px 14px; margin-bottom: 10px;
   }}
+  /* ------------------------------------------------------------------
+     PANEL HEAD. One rule for the ~30 places that used to write a bold
+     title and a quiet caption by hand. They had drifted apart — different
+     margins, some with a blank line between, some without — and that is
+     most of the reason two charts in one row did not start on the same
+     y even when the charts themselves were the same height.
+     ------------------------------------------------------------------ */
+  .tt-panelhead {{ margin: 2px 0 7px; line-height: 1.45; min-height: 34px; }}
+  .tt-panelhead b {{ font-size: 13.5px; font-weight: 700; color: {INK};
+      letter-spacing: -.01em; display: block; }}
+  .tt-panelhead .tt-quiet {{ display: block; margin-top: 1px; }}
   .tt-metric-label {{ font-size: 11px; text-transform: uppercase;
       letter-spacing: .06em; color: {INK_2}; }}
   .tt-metric-value {{ font-size: 26px; font-weight: 600; color: {INK}; line-height: 1.1; }}
@@ -1181,6 +1192,206 @@ def chart3d(fig, height: int = H_LG) -> None:
     st.plotly_chart(fig, use_container_width=True,
                     config={"displayModeBar": True, "displaylogo": False,
                             "modeBarButtonsToRemove": ["toImage"]})
+
+
+def evil_donut(labels, values, colours, *, text=None, centre: str = "",
+               centre_sub: str = "", hole: float = 0.66):
+    """EvilCharts' pie: a thin gradient ring with the total living in the hole.
+
+    The hole is 0.66 rather than their default because something is written in
+    it. A donut whose centre is empty is a pie chart wearing a disguise; a
+    donut whose centre carries the total is the only version of the form that
+    earns the space it takes.
+    """
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values, hole=hole, sort=False, direction="clockwise",
+        marker=dict(colors=colours, line=dict(color=CARD, width=2)),
+        text=text, hoverinfo="text" if text is not None else "label+percent",
+        textinfo="none"))
+    if centre:
+        fig.add_annotation(
+            text=(f"<b>{centre}</b>" +
+                  (f"<br><span style='font-size:10px'>{centre_sub}</span>"
+                   if centre_sub else "")),
+            x=0.5, y=0.5, showarrow=False, align="center",
+            font=dict(size=21, color=INK, family=FONT_CHART))
+    return fig
+
+
+def evil_radial(value: float, total: float, colour: str, *, label: str = "",
+                sub: str = ""):
+    """EvilCharts' radial bar — a semi-circle gauge over a full-circle track.
+
+    A share, drawn as an arc. Used where the app already had a ratio and was
+    printing it as a number: held-out accuracy, model-derived share, the
+    fraction of the queue that reached the chain.
+
+    Barpolar rather than Pie-with-a-hidden-half: a pie's hidden half still
+    occupies its layout box, so the chart sits with a hole under it that no
+    amount of margin fixes.
+    """
+    frac = 0.0 if not total else max(0.0, min(1.0, float(value) / float(total)))
+    fig = go.Figure()
+    fig.add_trace(go.Barpolar(r=[1], theta=[90], width=[360], base=[0],
+                              marker=dict(color=GRID), hoverinfo="skip",
+                              showlegend=False))
+    # Clockwise from twelve o'clock, which is the direction a reader expects a
+    # gauge to fill and the opposite of plotly's default.
+    fig.add_trace(go.Barpolar(
+        r=[1], theta=[90 - 180 * frac], width=[360 * frac], base=[0],
+        marker=dict(color=colour), showlegend=False,
+        hovertext=[f"{label}: {fmt(value, 0)} of {fmt(total, 0)} "
+                   f"({100 * frac:.1f}%)"], hoverinfo="text"))
+    fig.update_layout(
+        polar=dict(hole=0.68, bgcolor=CARD,
+                   radialaxis=dict(visible=False, range=[0, 1]),
+                   angularaxis=dict(visible=False, direction="clockwise",
+                                    rotation=90)),
+        annotations=[dict(text=f"<b>{sub or f'{100 * frac:.0f}%'}</b>",
+                          x=0.5, y=0.5, showarrow=False,
+                          font=dict(size=19, color=INK, family=FONT_CHART))])
+    return fig
+
+
+def evil_radar(cats, series, *, fill: bool = True, rng=None):
+    """EvilCharts' radar. `series` is [(name, values, colour), ...].
+
+    ONLY FOR COMMENSURABLE AXES. A radar silently implies that its spokes share
+    a scale and that the AREA it encloses means something; give it a mix of
+    percentages and seconds and it draws a confident shape out of nothing. Used
+    here only where every spoke is already the same unit — per-class precision
+    and recall, and a dog's features expressed in z-scores.
+    """
+    fig = go.Figure()
+    closed = list(cats) + [cats[0]] if cats else []
+    for name, vals, colour in series:
+        ring = list(vals) + [vals[0]] if vals else []
+        fig.add_trace(go.Scatterpolar(
+            r=ring, theta=closed, name=name, mode="lines+markers",
+            fill="toself" if fill else None,
+            fillcolor=alpha(colour, 0.16),
+            line=dict(color=colour, width=2, shape="linear"),
+            marker=dict(size=5, color=colour),
+            hovertemplate="%{theta}: %{r:.3f}<extra>" + name + "</extra>"))
+    dash = dict(griddash="dot") if HAS_GRIDDASH else {}
+    fig.update_layout(
+        showlegend=len(series) > 1,
+        paper_bgcolor=CARD, plot_bgcolor=CARD,
+        font=dict(family=FONT_CHART, size=11, color=INK_2),
+        margin=dict(l=30, r=30, t=34, b=34),
+        hoverlabel=dict(bgcolor=CARD, bordercolor=BORDER,
+                        font=dict(color=INK, size=11)),
+        legend=dict(orientation="h", y=-0.08, x=0.5, xanchor="center"),
+        polar=dict(bgcolor=CARD,
+                   radialaxis=dict(range=rng, gridcolor=BORDER, linecolor=BORDER,
+                                   tickfont=dict(size=9, color=INK_2), **dash),
+                   angularaxis=dict(gridcolor=BORDER, linecolor=BORDER,
+                                    tickfont=dict(size=10, color=INK_2), **dash)))
+    return fig
+
+
+def evil_sankey(labels, sources, targets, values, colours, *, text=None):
+    """EvilCharts' sankey. A flow, and only ever used for something that flows.
+
+    Two things in this app genuinely do: a first-order Markov chain over
+    behaviour states, where the width of a band IS the transition probability,
+    and the pipeline itself, where rows move raw -> staging -> marts -> oracle.
+    Neither is a bar chart wearing a costume.
+
+    Link colour is inherited from the SOURCE node at low alpha, which is what
+    makes a band readable as 'leaving here' rather than as its own object.
+    """
+    fig = go.Figure(go.Sankey(
+        arrangement="snap",
+        node=dict(label=labels, color=colours, pad=15, thickness=13,
+                  line=dict(color=CARD, width=0.5),
+                  hovertemplate="%{label}<extra></extra>"),
+        link=dict(source=sources, target=targets, value=values,
+                  color=[alpha(colours[s], 0.30) for s in sources],
+                  customdata=text or [""] * len(values),
+                  hovertemplate=("%{customdata}<extra></extra>" if text
+                                 else "%{source.label} → %{target.label}"
+                                      "<extra></extra>"))))
+    fig.update_layout(
+        paper_bgcolor=CARD, plot_bgcolor=CARD,
+        font=dict(family=FONT_CHART, size=10, color=INK_2),
+        margin=dict(l=6, r=6, t=30, b=6),
+        hoverlabel=dict(bgcolor=CARD, bordercolor=BORDER,
+                        font=dict(color=INK, size=11)))
+    return fig
+
+
+def evil_blocks(segments, *, title: str = "", gap: float = 0.004):
+    """EvilCharts' bar blocks: one stacked bar broken into visible tiles.
+
+    `segments` is [(label, value, colour), ...]. The hairline gap between tiles
+    is the whole difference from a plain stacked bar — it turns a continuous
+    band into countable blocks, so the eye reads four categories rather than
+    one bar with colour changes in it.
+    """
+    fig = go.Figure()
+    total = sum(float(v or 0) for _, v, _ in segments) or 1.0
+    for label, value, colour in segments:
+        share = 100.0 * float(value or 0) / total
+        fig.add_trace(go.Bar(
+            x=[max(0.0, share - gap * 100)], y=[""], orientation="h",
+            marker=dict(color=colour, line=dict(width=0)),
+            name=str(label),
+            hovertext=[f"{label}: {fmt(value, 0)} ({share:.1f}%)"],
+            hoverinfo="text"))
+    fig.update_layout(
+        barmode="stack", bargap=0.18, showlegend=True,
+        legend=dict(orientation="h", y=-0.55, x=0, font=dict(size=10)),
+        title=title or None, title_font_size=11,
+        xaxis=dict(visible=False), yaxis=dict(visible=False))
+    if HAS_BARRADIUS:
+        fig.update_layout(barcornerradius=3)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# LAYOUT
+#
+# The grid was the other half of the complaint and it is not a chart problem.
+# Rows were a mix of [3,1], [1,2], [3,2] and equal splits, and several sections
+# had no partner at all, so one column ran hundreds of pixels past the other and
+# every page ended ragged. Streamlit will not equalise columns for you — it
+# stacks each one independently — so matching heights has to be arithmetic the
+# page does before it draws, which is what these do.
+# ---------------------------------------------------------------------------
+def panel(title: str, note: str = "") -> None:
+    """A section heading and its one-line explanation, as one unit.
+
+    This pattern appeared ~30 times written out by hand, and the margins drifted
+    between copies — which is most of why two charts side by side did not start
+    on the same line even when they were the same height.
+    """
+    st.markdown(
+        f'<div class="tt-panelhead"><b>{title}</b>'
+        + (f'<span class="tt-quiet">{note}</span>' if note else "")
+        + "</div>", unsafe_allow_html=True)
+
+
+def row_h(*counts: int, row: int = 24, floor: int = H_MD) -> int:
+    """One height for every chart in a row, from the longest of them.
+
+    Generalises the `max(bars(a), bars(b))` that the Ethogram page already did
+    by hand. Pass the category count of each chart in the row; they all get the
+    height the biggest one needs, so their baselines line up.
+    """
+    return max([floor] + [bars(c, row=row) for c in counts if c])
+
+
+def table_pair(left_rows: list, right_rows: list, cap: int = 14):
+    """Trim two tables to a common length so neither overhangs the other.
+
+    Returns the trimmed pair and whether anything was dropped, so the caller
+    can say '14 of 38' rather than quietly truncating — an honest table that
+    admits it is a head is fine, a table that silently is one is not.
+    """
+    n = min(cap, max(len(left_rows), len(right_rows)))
+    return (left_rows[:n], right_rows[:n],
+            len(left_rows) > n or len(right_rows) > n)
 
 
 # ===========================================================================
