@@ -2748,130 +2748,205 @@ def _page_2():
                     f"by the renderer from the raw bout lengths — nothing was "
                     f"pre-binned or pre-smoothed on the way here.")
 
+        # ------------------------------------------------------------------
+        # THE TRANSITION MATRIX, THREE WAYS, AND ONLY ONE OF THEM IS A GRID.
+        #
+        # This row used to be a 2D heatmap of p(next | current) beside the
+        # donut. The heatmap was correct and almost unreadable: fourteen states
+        # is a 196-cell grid whose diagonal is near 1.0 and whose every other
+        # cell is under 0.05, so the colour scale was spent entirely on the
+        # diagonal and the off-diagonal — the part that says anything about
+        # BEHAVIOUR — was fourteen shades of nearly white.
+        #
+        # The surface is the same numbers with height doing the work colour
+        # could not. A ridge along the diagonal is a dog that persists in
+        # whatever it is doing; every bump off it is a change of behaviour, and
+        # on a landscape a 0.04 bump next to a 0.01 plain is visible, where two
+        # nearly-white cells are not. The contour projected onto the floor is
+        # the heatmap, kept, underneath the thing that made it legible.
+        # ------------------------------------------------------------------
         c1, c2 = st.columns(2)
 
         with c1:
-            st.markdown("**Transition matrix**")
-            st.markdown('<span class="tt-quiet">A first-order behavioural Markov '
-                        'chain, computed in SQL with LAG and row-normalised. Which '
-                        'behaviour follows which.</span>', unsafe_allow_html=True)
+            panel("Transition matrix, as a landscape",
+                  "A first-order behavioural Markov chain, computed in SQL "
+                  "with LAG and row-normalised. Height is p(next state | "
+                  "current state). Drag to rotate.")
             if PLOTLY and tr:
                 states = sorted({r["FROM_STATE"] for r in tr} | {r["TO_STATE"] for r in tr})
                 idx = {s: i for i, s in enumerate(states)}
-                z = [[None] * len(states) for _ in states]
-                txt = [[""] * len(states) for _ in states]
+                # 0.0 RATHER THAN None for an unobserved pair. A gap in a
+                # surface tears a hole in the mesh and reads as missing data;
+                # this is not missing, it is a transition that never once
+                # happened in the window, and zero is what that means.
+                z = [[0.0] * len(states) for _ in states]
+                txt = [["" for _ in states] for _ in states]
+                for i, a in enumerate(states):
+                    for j, b in enumerate(states):
+                        txt[i][j] = f"{a} → {b}<br>never observed"
                 for r in tr:
                     i, j = idx[r["FROM_STATE"]], idx[r["TO_STATE"]]
                     z[i][j] = float(r["PROB"] or 0)
                     txt[i][j] = (f'{r["FROM_STATE"]} → {r["TO_STATE"]}<br>'
                                  f'p = {fmt(r["PROB"],3)}<br>n = {fmt(r["N"],0)}')
-                fig = go.Figure(go.Heatmap(
-                    z=z, x=states, y=states, text=txt, hoverinfo="text",
-                    colorscale=[[0, "#FFFFFF"], [1, S_BLUE]], showscale=False,
-                    xgap=1, ygap=1))
-                fig.update_layout(title="p(next state | current state)",
-                                  title_font_size=11)
-                chart(clean_axes(fig, y_zero_line=False), H_MD)
+                ticks = list(range(len(states)))
+                fig = go.Figure(go.Surface(
+                    z=z, x=ticks, y=ticks, text=txt, hoverinfo="text",
+                    colorscale=[[0, CARD], [0.35, alpha(S_BLUE, 0.45)],
+                                [1, S_BLUE]],
+                    showscale=False, opacity=0.96,
+                    lighting=dict(ambient=0.72, diffuse=0.62, specular=0.12),
+                    contours=dict(z=dict(show=True, usecolormap=True,
+                                         project_z=True, width=1))))
+                scene3d(fig, "next state", "current state", "probability")
+                # The axes are states, not numbers. Without this the reader is
+                # looking at a landscape indexed 0..13.
+                cat = dict(tickmode="array", tickvals=ticks, ticktext=states,
+                           tickfont=dict(size=8, color=INK_2))
+                fig.update_layout(
+                    scene=dict(xaxis=cat, yaxis=cat,
+                               zaxis=dict(range=[0, 1]),
+                               aspectmode="manual",
+                               aspectratio=dict(x=1.25, y=1.25, z=0.62)))
+                chart3d(fig, H_LG)
+                renderer_note(
+                    "plotly · 3D",
+                    f"{len(states)}×{len(states)} transition probabilities as a "
+                    f"height field. The floor is the same matrix as a contour — "
+                    f"the heatmap this replaced, kept as the shadow of the "
+                    f"surface that made it readable.")
             else:
                 empty_state("No transitions.", "MARTS.STATE_TRANSITIONS is empty.")
 
         with c2:
-            st.markdown("**State budget**")
-            st.markdown('<span class="tt-quiet">How the session divides across '
-                        'the ethogram. The same states as the ribbon above, '
-                        'counted rather than laid out in time.</span>',
-                        unsafe_allow_html=True)
+            panel("State budget",
+                  "How the session divides across the ethogram. The same "
+                  "states as the ribbon above, counted rather than laid out "
+                  "in time.")
             if PLOTLY and budget:
-                fig = go.Figure(go.Pie(
-                    labels=col(budget, "STATE"),
-                    values=[float(x) for x in col(budget, "N")],
-                    hole=0.6, sort=False,
-                    marker=dict(colors=[palette.get(s, "#D6D3D1")
-                                        for s in col(budget, "STATE")],
-                                line=dict(color=CARD, width=1.5)),
-                    text=[f'{r["STATE"]} {r["PCT"]}%' for r in budget],
-                    hoverinfo="text", textinfo="none"))
+                _n = [float(x) for x in col(budget, "N")]
+                fig = evil_donut(
+                    col(budget, "STATE"), _n,
+                    [palette.get(s, "#D6D3D1") for s in col(budget, "STATE")],
+                    text=[f'{r["STATE"]} · {fmt(r["N"],0)} epochs · {r["PCT"]}%'
+                          for r in budget],
+                    centre=ago(sum(_n)),
+                    centre_sub=f"{len(budget)} states")
                 fig.update_layout(title="proportion of the session in each state",
                                   title_font_size=11)
-                chart(clean_axes(fig, y_zero_line=False), H_MD)
+                chart(clean_axes(fig, y_zero_line=False), H_LG)
+                renderer_note(
+                    "plotly · donut",
+                    "The hole carries the total the ring is a breakdown of. A "
+                    "donut whose centre is empty is a pie chart in disguise; "
+                    "the number in the middle is what pays for the shape.")
 
         # ------------------------------------------------------------------
-        # SECOND ROW, AND THE REASON THIS PAGE WAS REBUILT.
-        #
-        # The layout used to be one heatmap in the left column against a donut,
-        # a bar chart and a table stacked in the right — so the left half of the
-        # page ran out about 600px above the right half and the tab read as
-        # half-finished. Both halves of this row are bar charts of the same
-        # ethogram, sized together so they end on the same line.
+        # SECOND ROW. Both halves are sized together by row_h() so they end on
+        # the same line — the rule this page was rebuilt around and which the
+        # rest of the app now follows.
         # ------------------------------------------------------------------
         # self-transitions are ~95% of every row (a dog in REST stays in REST)
         # and would be the only thing visible on the chart
         moves = sorted([r for r in tr if r["FROM_STATE"] != r["TO_STATE"]],
                        key=lambda r: -(r["PROB"] or 0))[:12]
-        row_h = max(bars(len(moves)), bars(len(bl)))
+        h_row = row_h(len(moves), len(bl))
 
         d1, d2 = st.columns(2)
 
         with d1:
-            st.markdown("**What follows what**")
-            st.markdown('<span class="tt-quiet">The same matrix, read out loud. '
-                        'Self-transitions are dropped — a dog at rest stays at '
-                        'rest through 95% of its seconds, and leaving that in '
-                        'means the only thing visible is the diagonal.</span>',
-                        unsafe_allow_html=True)
+            panel("What follows what",
+                  "The same matrix as a flow. Self-transitions are dropped — "
+                  "a dog at rest stays at rest through 95% of its seconds, "
+                  "and leaving that in means the only thing visible is the "
+                  "diagonal.")
             if PLOTLY and moves:
-                labels = [f'{r["FROM_STATE"]} → {r["TO_STATE"]}' for r in moves][::-1]
-                fig = go.Figure(go.Bar(
-                    x=[float(r["PROB"] or 0) for r in moves][::-1], y=labels,
-                    orientation="h",
-                    marker=dict(color=[palette.get(r["TO_STATE"], "#D6D3D1")
-                                       for r in moves][::-1]),
-                    hovertext=[f'{r["FROM_STATE"]} → {r["TO_STATE"]}<br>'
+                # A SANKEY, BECAUSE A MARKOV CHAIN IS A FLOW AND NOT A RANKING.
+                #
+                # This was twelve horizontal bars of p, which answered "which
+                # transition is likeliest" and hid the thing worth seeing:
+                # that several transitions LEAVE the same state, and the band
+                # widths out of one node are the shape of that dog's choices.
+                #
+                # THE NODES ARE DUPLICATED, from-side and to-side, and they
+                # have to be. A sankey is a directed ACYCLIC graph; a
+                # behavioural chain is full of cycles — WALK to SNIFF to WALK
+                # — and feeding those to one shared node set produces a
+                # figure plotly either refuses to lay out or draws as a knot.
+                # Two columns of the same states makes the cycle a legal edge
+                # from the left copy to the right copy.
+                froms = sorted({r["FROM_STATE"] for r in moves})
+                tos = sorted({r["TO_STATE"] for r in moves})
+                lab = [str(s) for s in froms] + [str(s) for s in tos]
+                hue = ([palette.get(s, "#D6D3D1") for s in froms]
+                       + [palette.get(s, "#D6D3D1") for s in tos])
+                fi = {s: i for i, s in enumerate(froms)}
+                ti = {s: len(froms) + i for i, s in enumerate(tos)}
+                fig = evil_sankey(
+                    lab,
+                    [fi[r["FROM_STATE"]] for r in moves],
+                    [ti[r["TO_STATE"]] for r in moves],
+                    [float(r["PROB"] or 0) for r in moves],
+                    hue,
+                    text=[f'{r["FROM_STATE"]} → {r["TO_STATE"]}<br>'
                           f'p = {fmt(r["PROB"],3)}<br>{fmt(r["N"],0)} times'
-                          for r in moves][::-1],
-                    hoverinfo="text"))
-                fig.update_layout(title="likeliest changes of behaviour, "
-                                        "coloured by where the dog ends up",
-                                  title_font_size=11)
-                chart(clean_axes(fig, y_zero_line=False), row_h)
+                          for r in moves])
+                fig.update_layout(
+                    title="the twelve likeliest changes of behaviour — band "
+                          "width is probability",
+                    title_font_size=11)
+                chart(fig, h_row)
+                renderer_note(
+                    "plotly · sankey",
+                    f"{len(moves)} transitions between {len(froms)} states the "
+                    f"dog left and {len(tos)} it arrived in. Band width is the "
+                    f"row-normalised probability straight out of "
+                    f"MARTS.STATE_TRANSITIONS.")
             else:
                 empty_state("No changes of state.",
                             "This dog never left its first state in the "
                             "window, or MARTS.STATE_TRANSITIONS is empty.")
 
         with d2:
-            st.markdown("**Bout-length distribution**")
-            st.markdown('<span class="tt-quiet">Where lameness and exercise '
-                        'intolerance become visible before any syndrome fires: '
-                        'identical totals, different bout lengths.</span>',
-                        unsafe_allow_html=True)
+            panel("Bout-length distribution",
+                  "Where lameness and exercise intolerance become visible "
+                  "before any syndrome fires: identical totals, different "
+                  "bout lengths.")
             if PLOTLY and bl:
                 # Median as the bar, mean as a marker on top of it. The GAP
                 # between them is the finding: a state whose mean sits far
                 # above its median is one long bout hiding in a pile of short
                 # ones, which is exactly the shape lameness makes.
+                #
+                # The track behind each bar is the longest median on the
+                # chart, so a two-second state reads as short rather than
+                # merely as a small bar.
                 names = [str(r["STATE"]) for r in bl][::-1]
                 fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=[float(r["MEDIAN_S"] or 0) for r in bl][::-1], y=names,
-                    orientation="h",
-                    marker=dict(color=[palette.get(n, "#D6D3D1") for n in names]),
-                    hovertext=[f'{r["STATE"]}<br>median {fmt(r["MEDIAN_S"],0)}s'
+                evil_bar(
+                    fig, names, [float(r["MEDIAN_S"] or 0) for r in bl][::-1],
+                    [palette.get(n, "#D6D3D1") for n in names],
+                    text=[f'{r["STATE"]}<br>median {fmt(r["MEDIAN_S"],0)}s'
                           f'<br>mean {fmt(r["MEAN_S"],1)}s'
                           f'<br>longest {fmt(r["MAX_S"],0)}s'
-                          f'<br>{fmt(r["BOUTS"],0)} bouts' for r in bl][::-1],
-                    hoverinfo="text"))
+                          f'<br>{fmt(r["BOUTS"],0)} bouts' for r in bl][::-1])
                 fig.add_trace(go.Scatter(
                     x=[float(r["MEAN_S"] or 0) for r in bl][::-1], y=names,
                     mode="markers",
-                    marker=dict(color=INK, size=7, symbol="line-ns-open",
-                                line=dict(width=1.6, color=INK)),
+                    marker=dict(color=INK, size=13, symbol="line-ns-open",
+                                line=dict(width=1.8, color=INK)),
                     text=[f'mean {fmt(r["MEAN_S"],1)}s' for r in bl][::-1],
-                    hoverinfo="text"))
+                    hoverinfo="text", showlegend=False))
                 fig.update_layout(title="median bout length (bar) against the mean "
                                         "(tick) — seconds",
                                   title_font_size=11)
-                chart(clean_axes(fig, y_zero_line=False), row_h)
+                chart(evil_axes(fig, y_zero_line=False, dotted="x"), h_row)
+                renderer_note(
+                    "plotly · composed",
+                    "Two marks on one frame: the bar is the median, the tick "
+                    "is the mean. Read the distance between them — a tick far "
+                    "to the right of its bar is one long bout hiding inside a "
+                    "pile of short ones.")
 
         # Third row: the numbers behind the two charts above, and the ethogram
         # they are all expressed in. The definitions belong on this page and
