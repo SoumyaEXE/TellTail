@@ -9,7 +9,10 @@ Every offline check, in one command. No Snowflake account, no credits, no networ
   2. demo signal            synthesises IMU signal, runs the real feature math
                             and state ladder, and matches the real patterns
   3. SiS compatibility      the Streamlit app must parse under Python 3.11
-  4. SQL parse              every warehouse/*.sql splits into statements cleanly
+  4. chart layer            every chart helper builds a figure on a current
+                            plotly AND on the old one SiS may solve to, plus
+                            the Altair 4/5 selection shim
+  5. SQL parse              every warehouse/*.sql splits into statements cleanly
 """
 from __future__ import annotations
 
@@ -96,6 +99,8 @@ def main() -> int:
         ("SiS compatibility", run("3 · Streamlit in Snowflake compatibility",
                                   [PY, "tests/sis_compat.py",
                                    "warehouse/streamlit_app.py"])),
+        ("chart layer", run("4 · chart layer, native and degraded",
+                            [PY, "tests/test_chart_layer.py"])),
         ("SQL parse", check_sql()),
     ]
 

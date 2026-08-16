@@ -1530,10 +1530,24 @@ def avals(data: list[dict]):
 # chart worked while the click selection did not.
 # ---------------------------------------------------------------------------
 def alt_point(*, fields: list[str], name: str, toggle=None):
-    """A click/tap selection over `fields`, on whichever Altair is installed."""
+    """A click/tap selection over `fields`, on whichever Altair is installed.
+
+    `toggle` is OMITTED rather than passed as None when it is not wanted.
+    Altair treats an explicit None as a value to encode rather than as 'not
+    supplied', and fails deep inside schema validation with
+
+        TypeError: cannot use 'list' as a dict key
+
+    which names neither the argument nor the function that took it. Passing the
+    keyword only when it has a value is the difference between the default
+    behaviour and a traceback.
+    """
+    kw = dict(fields=fields, name=name)
+    if toggle is not None:
+        kw["toggle"] = toggle
     if hasattr(alt, "selection_point"):                       # 5, 6
-        return alt.selection_point(fields=fields, name=name, toggle=toggle)
-    return alt.selection_multi(fields=fields, name=name, toggle=toggle)  # 4
+        return alt.selection_point(**kw)
+    return alt.selection_multi(**kw)                          # 4
 
 
 def alt_bind(chart_obj, selection):
