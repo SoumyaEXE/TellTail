@@ -3522,7 +3522,7 @@ def _page_3():
                         hoverinfo="text", showlegend=False))
                 fig.update_layout(title="matches by quantifier strictness",
                                   title_font_size=11)
-                chart(clean_axes(fig), H_MD)
+                chart(evil_axes(fig), H_MD)
             else:
                 empty_state("No sensitivity sweep.",
                             "CALL MARTS.SP_SYNDROME_SWEEP() runs all 18 variants.")
@@ -3553,7 +3553,7 @@ def _page_3():
                                               font=dict(size=10)),
                                   title="syndrome frequency by weight band",
                                   title_font_size=11)
-                chart(clean_axes(fig), H_MD)
+                chart(evil_axes(fig), H_MD)
             else:
                 empty_state("No cohort breakdown.", "REF.DOG_INFO may be empty.")
 
@@ -3693,7 +3693,7 @@ def _page_4():
                            if alone else
                            "activity index, this dog against its cohort"),
                     title_font_size=11)
-                chart(clean_axes(fig, y_zero_line=False), bars(len(by_dog), row=18))
+                chart(evil_axes(fig, y_zero_line=False, dotted="x"), bars(len(by_dog), row=18))
             if summ:
                 s = summ[0]
                 html_table([
@@ -3878,7 +3878,7 @@ def _page_5():
                                           font=dict(size=10)),
                               title="cached notes by syndrome, stacked by triage band",
                               title_font_size=11)
-            chart(clean_axes(fig), H_SM)
+            chart(evil_axes(fig), H_SM)
 
         labels = [f'{n["SYNDROME_CODE"]} · dog {n["DOG_ID"]} · '
                   f'{str(n["ONSET_TS"])[:19]} · {n["TRIAGE_LABEL"]}' for n in notes]
@@ -4191,7 +4191,7 @@ def _page_6():
             fig.update_layout(title="how well each feature separates the states "
                                     "(neck/back correlation in amber)",
                               title_font_size=11)
-            chart(clean_axes(fig, y_zero_line=False), bars(len(names), row=16))
+            chart(evil_axes(fig, y_zero_line=False, dotted="x"), bars(len(names), row=16))
         else:
             empty_state("No feature separation yet.",
                         "Needs labelled epochs: run the bulk load and push the "
@@ -4675,7 +4675,7 @@ def _page_8():
                            tickvals=[0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50],
                            ticktext=["0.1×", "0.25×", "0.5×", "1× target",
                                      "2×", "5×", "10×", "25×", "50×"]))
-            chart(clean_axes(fig, y_zero_line=False), bars(len(names)))
+            chart(evil_axes(fig, y_zero_line=False, dotted="x"), bars(len(names)))
         if lag:
             html_table([{"o": f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}',
                          "t": fmt(r["TARGET_LAG_SEC"], 0),
@@ -4826,15 +4826,8 @@ def _page_8():
         order = [("PENDING", "#D6D3D1"), ("SENT", S_YELLOW),
                  ("CONFIRMED", "#15803D"), ("FAILED", "#B91C1C")]
         present = [(s, h) for s, h in order if counts.get(s)]
-        fig = go.Figure()
-        for s, h in present:
-            fig.add_trace(go.Bar(
-                x=[counts[s]], y=["queue"], orientation="h",
-                marker=dict(color=h, line=dict(width=1, color=CARD)),
-                hovertext=[f"{s}: {counts[s]} claims"], hoverinfo="text",
-                showlegend=False))
-        fig.update_layout(barmode="stack",
-                          xaxis=dict(visible=False), yaxis=dict(visible=False))
+        fig = evil_blocks([(s.lower(), counts[s], h) for s, h in present])
+        fig.update_layout(showlegend=False)
         chart(clean_axes(fig), H_STRIP)
         st.markdown(" ".join(
             f'<span class="tt-chip" style="background:{h}22;border-color:{h}">'
@@ -5170,15 +5163,8 @@ def _page_10():
             order = [("PENDING", "#D6D3D1"), ("SENT", S_YELLOW),
                      ("CONFIRMED", "#15803D"), ("FAILED", "#B91C1C")]
             present = [(s, h) for s, h in order if counts.get(s)]
-            fig = go.Figure()
-            for s, h in present:
-                fig.add_trace(go.Bar(
-                    x=[counts[s]], y=["queue"], orientation="h",
-                    marker=dict(color=h, line=dict(width=1, color=CARD)),
-                    hovertext=[f"{s}: {counts[s]}"], hoverinfo="text",
-                    showlegend=False))
-            fig.update_layout(barmode="stack", xaxis=dict(visible=False),
-                              yaxis=dict(visible=False))
+            fig = evil_blocks([(s.lower(), counts[s], h) for s, h in present])
+            fig.update_layout(showlegend=False)
             chart(clean_axes(fig), H_STRIP)
             st.markdown(" ".join(
                 f'<span class="tt-chip" style="background:{h}22;'
@@ -5203,7 +5189,7 @@ def _page_10():
                 hoverinfo="text"))
             fig.update_layout(title="confirmed attestations by syndrome",
                               title_font_size=11)
-            chart(clean_axes(fig), H_SM)
+            chart(evil_axes(fig), H_SM)
 
     # ---- inspect one, byte for byte --------------------------------------
     st.markdown("---")
