@@ -180,6 +180,7 @@ TRIAGE_COLOUR = {
 # pitch and clamps, so it cannot run away down the page.
 # ---------------------------------------------------------------------------
 H_STRIP = 56       # one stacked bar, no axes (the triage mix)
+H_GAUGE = 148      # one radial gauge in a row of them
 H_RIBBON = 96      # a state or symbol ribbon
 H_SM = 260         # a supporting chart, or one of a stack of time series
 H_MD = 320         # the default: a chart in a two-column row
@@ -240,7 +241,12 @@ st.markdown(f"""
   .tt-panelhead .tt-quiet {{ display: block; margin-top: 1px; }}
   .tt-metric-label {{ font-size: 11px; text-transform: uppercase;
       letter-spacing: .06em; color: {INK_2}; }}
-  .tt-metric-value {{ font-size: 26px; font-weight: 600; color: {INK}; line-height: 1.1; }}
+  /* min-width:0 + overflow-wrap, because one of these tiles carries a
+     timestamp. "2026-08-16 11:42:59" at 26px is wider than a fifth of the row
+     and ran straight out through the card's right border; it now wraps at the
+     space instead of overflowing, and the tiles in a strip stay one height. */
+  .tt-metric-value {{ font-size: 26px; font-weight: 600; color: {INK};
+      line-height: 1.15; min-width: 0; overflow-wrap: anywhere; }}
   /* The pack grid. Every card is the same height and the sparkline is pinned
      to the bottom, so 45 cards read as a grid instead of a ragged column.
      Breed names run from "Beauceron" to "Nova Scotia Duck Tolling Retriever";
@@ -326,6 +332,12 @@ st.markdown(f"""
   .tt-caveat {{ background: #FEF3C7; border-left: 3px solid {ACCENT};
       padding: 8px 12px; font-size: 12px; color: #78350F; margin: 8px 0; }}
   .tt-quiet {{ color: {INK_2}; font-size: 12px; }}
+  /* Caption under a radial gauge. Written as HTML rather than as a plotly
+     annotation below the polar area: an annotation at a negative paper y is
+     clipped by the figure box at some heights and not at others, which is why
+     the three gauges on the pack page were drawing unlabelled. */
+  .tt-gaugecap {{ margin: -10px 0 2px; text-align: center; font-size: 10.5px;
+      color: {INK_2}; line-height: 1.3; }}
   /* Byline under a chart: which of the three renderers drew it, and what
      that bought. Sits tight under the figure, so the caption reads as part
      of the chart rather than as the next paragraph. */
@@ -381,6 +393,17 @@ st.markdown(f"""
       color: {INK_2}; font-weight: 600; text-transform: uppercase; font-size: 10px;
       letter-spacing: .05em; }}
   table.tt td {{ border-bottom: 1px solid {GRID}; padding: 5px 8px; }}
+  /* A register in a fixed box, for the half of a row whose partner is short.
+     The header is pinned, or a scrolled table loses the only thing that says
+     what its columns are. */
+  .tt-scroll {{ overflow-y: auto; overflow-x: hidden; border: 1px solid {BORDER};
+      border-radius: 4px; background: {CARD}; }}
+  .tt-scroll table.tt th {{ position: sticky; top: 0; background: {CARD};
+      z-index: 1; box-shadow: 0 1px 0 {BORDER}; }}
+  .tt-scroll table.tt tr:last-child td {{ border-bottom: none; }}
+  /* An inline proportional bar inside a table cell: the column reads as a
+     chart without becoming one. */
+  .tt-cellbar {{ display: block; height: 4px; border-radius: 2px; margin-top: 3px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -705,40 +728,52 @@ def sensor_anatomy_svg(neck_hz=100, back_hz=100) -> str:
     the whole animal does. On four lines and a circle you cannot see that, and
     the reader has to take the claim on trust.
     """
-    return (
-        '<svg viewBox="255 45 880 665" role="img" '
+    # ONE LINE, NO BLANK LINES, AND THAT IS NOT A STYLE CHOICE.
+    #
+    # This markup used to be a triple-quoted block with blank lines separating
+    # the collar group from the harness group. st.markdown runs its input
+    # through a Markdown renderer before the HTML reaches the page, and a blank
+    # line TERMINATES an HTML block: everything after the first one stopped
+    # being markup and became paragraph text. The skeleton still drew, because
+    # it comes first — but both sensor dots, both leader lines, the dashed arc
+    # and all four labels vanished, and the label TEXT reappeared underneath
+    # the figure as a wrapped sentence reading "COLLAR cervical spine BACK
+    # HARNESS thoracic spine CORR(vm_neck, vm_back) both at 100/100 Hz…".
+    # It looked like a caption someone forgot to style. It was the diagram.
+    parts = [
+        '<svg viewBox="255 45 880 700" role="img" '
         'aria-label="Dog skeleton showing the collar sensor on the cervical '
         'vertebrae and the harness sensor on the thoracic vertebrae" '
-        'style="width:100%;height:auto;display:block">'
-        + _DOG_SKELETON_G
-        + f'''<g font-family="{FONT_CHART}">
-  <path d="M521,220 Q604,163 688,223" fill="none" stroke="{INK}"
-        stroke-width="2.5" stroke-dasharray="8 7"/>
-
-  <line x1="497" y1="206" x2="497" y2="114" stroke="{S_ORANGE}" stroke-width="2"/>
-  <circle cx="497" cy="237" r="31" fill="none" stroke="{S_ORANGE}"
-          stroke-width="3" opacity=".4"/>
-  <circle cx="497" cy="237" r="15" fill="{S_ORANGE}"/>
-  <text x="497" y="104" text-anchor="middle" font-size="27" font-weight="700"
-        fill="{S_ORANGE}">COLLAR</text>
-  <text x="497" y="76" text-anchor="middle" font-size="20"
-        fill="{INK_2}">cervical spine</text>
-
-  <line x1="712" y1="209" x2="712" y2="114" stroke="{S_BLUE}" stroke-width="2"/>
-  <circle cx="712" cy="240" r="31" fill="none" stroke="{S_BLUE}"
-          stroke-width="3" opacity=".4"/>
-  <circle cx="712" cy="240" r="15" fill="{S_BLUE}"/>
-  <text x="712" y="104" text-anchor="middle" font-size="27" font-weight="700"
-        fill="{S_BLUE}">BACK HARNESS</text>
-  <text x="712" y="76" text-anchor="middle" font-size="20"
-        fill="{INK_2}">thoracic spine</text>
-
-  <text x="690" y="660" text-anchor="middle" font-size="26" font-weight="700"
-        fill="{INK}">CORR(vm_neck, vm_back)</text>
-  <text x="690" y="688" text-anchor="middle" font-size="20" fill="{INK_2}">both
-    at {neck_hz}/{back_hz} Hz — high = the whole body is travelling, low = the
-    head is acting alone</text>
-</g>''' + '</svg>')
+        'style="width:100%;height:auto;display:block">',
+        _DOG_SKELETON_G,
+        f'<g font-family="{FONT_CHART}">',
+        # the arc from one sensor to the other: the correlation, as a gesture
+        f'<path d="M521,220 Q604,163 688,223" fill="none" stroke="{INK}" '
+        f'stroke-width="2.5" stroke-dasharray="8 7"/>',
+        f'<line x1="497" y1="206" x2="497" y2="114" stroke="{S_ORANGE}" stroke-width="2"/>',
+        f'<circle cx="497" cy="237" r="31" fill="none" stroke="{S_ORANGE}" '
+        f'stroke-width="3" opacity=".4"/>',
+        f'<circle cx="497" cy="237" r="15" fill="{S_ORANGE}"/>',
+        f'<text x="497" y="104" text-anchor="middle" font-size="27" '
+        f'font-weight="700" fill="{S_ORANGE}">COLLAR</text>',
+        f'<text x="497" y="76" text-anchor="middle" font-size="20" '
+        f'fill="{INK_2}">cervical spine</text>',
+        f'<line x1="712" y1="209" x2="712" y2="114" stroke="{S_BLUE}" stroke-width="2"/>',
+        f'<circle cx="712" cy="240" r="31" fill="none" stroke="{S_BLUE}" '
+        f'stroke-width="3" opacity=".4"/>',
+        f'<circle cx="712" cy="240" r="15" fill="{S_BLUE}"/>',
+        f'<text x="712" y="104" text-anchor="middle" font-size="27" '
+        f'font-weight="700" fill="{S_BLUE}">BACK HARNESS</text>',
+        f'<text x="712" y="76" text-anchor="middle" font-size="20" '
+        f'fill="{INK_2}">thoracic spine</text>',
+        f'<text x="690" y="668" text-anchor="middle" font-size="26" '
+        f'font-weight="700" fill="{INK}">CORR(vm_neck, vm_back)</text>',
+        f'<text x="690" y="700" text-anchor="middle" font-size="19" '
+        f'fill="{INK_2}">both at {neck_hz}/{back_hz} Hz — high = the whole body '
+        f'is travelling, low = the head is acting alone</text>',
+        "</g></svg>",
+    ]
+    return "".join(parts)
 
 
 def symbol_ribbon(code, dog_id, test_num, match_id, *, height=H_RIBBON):
@@ -897,16 +932,51 @@ def rail_meter(label: str, value: str, frac, hue: str, note: str = "") -> str:
         f'style="width:{pct * 100:.1f}%;background:{hue}"></div></div></div>')
 
 
-def html_table(data: list[dict], columns: list[tuple[str, str]]) -> None:
-    """HAZARD 2 fallback. SiS pins an older Streamlit; st.column_config may not
-    exist, and st.dataframe of Decimals renders badly. A styled HTML table is
-    also denser, which suits a clinical register."""
+def table_html(data: list[dict], columns: list[tuple[str, str]]) -> str:
+    """The markup for a register, without rendering it — so the same table can
+    be dropped on the page or put inside a scroll box."""
     head = "".join(f"<th>{label}</th>" for _, label in columns)
     body = ""
     for r in data:
         cells = "".join(f"<td>{'' if r.get(k) is None else r.get(k)}</td>" for k, _ in columns)
         body += f"<tr>{cells}</tr>"
-    st.markdown(f'<table class="tt"><tr>{head}</tr>{body}</table>', unsafe_allow_html=True)
+    return f'<table class="tt"><tr>{head}</tr>{body}</table>'
+
+
+def html_table(data: list[dict], columns: list[tuple[str, str]]) -> None:
+    """HAZARD 2 fallback. SiS pins an older Streamlit; st.column_config may not
+    exist, and st.dataframe of Decimals renders badly. A styled HTML table is
+    also denser, which suits a clinical register."""
+    st.markdown(table_html(data, columns), unsafe_allow_html=True)
+
+
+def scroll_table(data: list[dict], columns: list[tuple[str, str]],
+                 *, height: int = 320) -> None:
+    """A register that keeps every row but only takes `height` pixels of page.
+
+    THE ANSWER TO A LONG TABLE BESIDE A SHORT ONE. A forty-row table next to a
+    six-row one ends four hundred pixels lower, and the two ways out of that
+    are both bad: pad the short one with nothing, or delete rows off the long
+    one. A fixed box with the header pinned does neither — the column ends
+    where its partner ends and the rows are all still there.
+    """
+    st.markdown(
+        f'<div class="tt-scroll" style="max-height:{height}px">'
+        + table_html(data, columns) + "</div>", unsafe_allow_html=True)
+
+
+def cell_bar(value, span: float, colour: str, nd: int = 0) -> str:
+    """A number with a proportional hairline under it, for a table cell.
+
+    A register of forty numbers is a wall; the same numbers with four pixels of
+    length under each are a chart the reader can rank at a glance without the
+    column stopping being a number they can read exactly. `span` is passed in
+    rather than derived from the rows shown, so a filtered view does not
+    quietly rescale itself against its own maximum.
+    """
+    frac = 0.0 if not span else max(0.0, min(1.0, float(value or 0) / span))
+    return (f'{fmt(value, nd)}<span class="tt-cellbar" '
+            f'style="width:{100 * frac:.1f}%;background:{colour}"></span>')
 
 
 def dataframe(data: list[dict], columns: list[tuple[str, str]]) -> None:
@@ -1366,8 +1436,13 @@ def evil_blocks(segments, *, title: str = "", gap: float = 0.004):
     fig.update_layout(
         barmode="stack", bargap=0.18, showlegend=True,
         legend=dict(orientation="h", y=-0.55, x=0, font=dict(size=10)),
-        title=title or None, title_font_size=11,
         xaxis=dict(visible=False), yaxis=dict(visible=False))
+    # ONLY TOUCH layout.title WHEN THERE IS A TITLE. `title=None` with
+    # `title_font_size=11` still creates the title container, and plotly.js
+    # draws a title object whose `text` is unset as the literal string
+    # "undefined" — which is exactly what was sitting above the triage mix bar.
+    if title:
+        fig.update_layout(title=dict(text=title, font=dict(size=11)))
     if HAS_BARRADIUS:
         fig.update_layout(barcornerradius=3)
     return fig
@@ -1406,16 +1481,11 @@ def row_h(*counts: int, row: int = 24, floor: int = H_MD) -> int:
     return max([floor] + [bars(c, row=row) for c in counts if c])
 
 
-def table_pair(left_rows: list, right_rows: list, cap: int = 14):
-    """Trim two tables to a common length so neither overhangs the other.
-
-    Returns the trimmed pair and whether anything was dropped, so the caller
-    can say '14 of 38' rather than quietly truncating — an honest table that
-    admits it is a head is fine, a table that silently is one is not.
-    """
-    n = min(cap, max(len(left_rows), len(right_rows)))
-    return (left_rows[:n], right_rows[:n],
-            len(left_rows) > n or len(right_rows) > n)
+# table_pair() lived here. It trimmed two tables to `min(cap, MAX(len(a),
+# len(b)))` and called that a pairing, which it is not: the max only binds the
+# LONGER table, so a 40-row register beside a permanently-6-row one came out
+# 18 against 6 and the row ended ragged anyway. Its one caller now uses
+# scroll_table(), which keeps every row and fixes the height instead.
 
 
 # ===========================================================================
@@ -1920,6 +1990,28 @@ def _page_0():
             # on one and flat on the other is the interesting case, and it is
             # invisible in any 2D view that picks one of them.
             fig = go.Figure()
+            # DROP LINES FIRST, SO THEY SIT BEHIND THE POINTS.
+            # A 45-point scatter in a cube reads as a flat smear: nothing tells
+            # the eye whether a marker is high on `findings` or merely far from
+            # the camera. A hairline from each dog down to the findings=0 floor
+            # is the standard depth cue and it adds no information that is not
+            # already the point's own coordinate. One trace with None breaks
+            # rather than 45 traces, or the legend fills with them.
+            _lx: list = []
+            _ly: list = []
+            _lz: list = []
+            for d in pack:
+                _n = float(d.get("N_FINDINGS") or 0)
+                if _n <= 0:
+                    continue
+                _lx += [float(d.get("Z_SELF") or 0)] * 2 + [None]
+                _ly += [float(d.get("Z_COHORT") or 0)] * 2 + [None]
+                _lz += [0.0, _n, None]
+            if _lx:
+                fig.add_trace(go.Scatter3d(
+                    x=_lx, y=_ly, z=_lz, mode="lines",
+                    line=dict(color=BORDER, width=1.5),
+                    hoverinfo="skip", showlegend=False))
             for sev in sorted({d.get("TRIAGE_SEVERITY") for d in pack},
                               key=lambda s: (s is None, s)):
                 grp = [d for d in pack if d.get("TRIAGE_SEVERITY") == sev]
@@ -1951,10 +2043,11 @@ def _page_0():
             renderer_note(
                 "plotly · 3D",
                 f"{len(pack)} dogs, three measured axes, no projection chosen "
-                f"for you. Colour is the triage band a Cortex task wrote into "
-                f"AI.TRIAGE — it is not one of the three axes, so agreement "
-                f"between position and colour is a result rather than a "
-                f"construction.")
+                f"for you. The hairline under each dog is a drop line to the "
+                f"findings=0 floor — a depth cue, not a fourth number. Colour "
+                f"is the triage band a Cortex task wrote into AI.TRIAGE — it "
+                f"is not one of the three axes, so agreement between position "
+                f"and colour is a result rather than a construction.")
 
     with a2:
         panel("Pack brief", "AI_AGG over the cached notes, written by a task.")
@@ -2005,18 +2098,21 @@ def _page_0():
                            sum(float(d.get("EPOCHS_HEURISTIC") or 0) for d in pack),
                            sum(float(d.get("EPOCHS_TOTAL") or 0) for d in pack) or 1.0,
                            "#A8A29E", None))
+            # HEIGHT, EXPLICITLY. These three were the only charts on the page
+            # rendered without one, so they took plotly's default 450px each —
+            # three near-empty boxes half a screen tall, which pushed this
+            # column hundreds of pixels past the 3D scene beside it and left
+            # the page ending ragged. H_GAUGE is the arc plus its caption.
             gcols = st.columns(len(gauges))
             for gc, (lbl, val, den, hue, sub) in zip(gcols, gauges):
                 with gc:
                     fig = evil_radial(val, den, hue, label=lbl, sub=sub or "")
-                    fig.update_layout(margin=dict(l=2, r=2, t=4, b=22),
-                                      annotations=list(fig.layout.annotations) + [
-                                          dict(text=lbl, x=0.5, y=-0.14,
-                                               showarrow=False, xref="paper",
-                                               yref="paper",
-                                               font=dict(size=9.5, color=INK_2))])
+                    fig.update_layout(height=H_GAUGE,
+                                      margin=dict(l=4, r=4, t=6, b=6))
                     st.plotly_chart(fig, use_container_width=True,
                                     config={"displayModeBar": False})
+                    st.markdown(f'<div class="tt-gaugecap">{esc(lbl)}</div>',
+                                unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
     # THE CARD GRID, NOW FULL WIDTH AND FOUR ACROSS.
@@ -2227,9 +2323,23 @@ def _page_1():
         # renders broken — and the useful picture is sensor PLACEMENT anyway.
         with st.expander("Where the two sensors sit, and why their correlation is the feature",
                          expanded=True):
-            a1, a2 = st.columns([3, 2])
+            # EQUAL COLUMNS AND A CAPPED FIGURE. At [3, 2] the drawing filled
+            # three fifths of the row, and an 880x700 viewBox at width:100% is
+            # over six hundred pixels tall — against a prose card half that, so
+            # the panel ended in a column of skeleton beside a column of white.
+            # The figure is capped instead of stretched: it is a diagram, and a
+            # diagram gets no clearer past about five hundred pixels.
+            a1, a2 = st.columns(2)
             with a1:
-                st.markdown(sensor_anatomy_svg(), unsafe_allow_html=True)
+                st.markdown(
+                    '<div style="max-width:470px;margin:0 auto">'
+                    + sensor_anatomy_svg() + "</div>", unsafe_allow_html=True)
+                # A LICENCE CONDITION, NOT A NICETY. The skeleton is CC BY-SA
+                # and the attribution has to be on the page it appears on. It
+                # was written as a constant and then never rendered.
+                st.markdown(f'<div class="tt-quiet" style="text-align:center;'
+                            f'font-size:10.5px;margin-top:2px">{SKELETON_CREDIT}'
+                            f'</div>', unsafe_allow_html=True)
             with a2:
                 st.markdown(
                     '<div class="tt-card" style="font-size:13px;line-height:1.55">'
@@ -2246,6 +2356,31 @@ def _page_1():
                     'are built on. The chart below it is the raw 100 Hz signal '
                     'the correlation is taken over.</span></div>',
                     unsafe_allow_html=True)
+                # The two readings the whole tab turns on, said as the numbers
+                # they actually are rather than left to the prose. This is also
+                # what brings the right column down to meet the figure.
+                st.markdown(f"""
+<div class="tt-card" style="margin-top:10px">
+  <div class="tt-metric-label">what the correlation says</div>
+  <div style="display:flex;gap:14px;margin-top:8px;font-size:12.5px;
+              line-height:1.5;flex-wrap:wrap">
+    <div style="flex:1 1 150px">
+      <b style="color:{S_BLUE}">corr near +1</b><br>
+      <span class="tt-quiet">neck and back rise and fall together. The whole
+      animal is travelling: walk, trot, gallop, pace.</span>
+    </div>
+    <div style="flex:1 1 150px">
+      <b style="color:{S_ORANGE}">corr near 0</b><br>
+      <span class="tt-quiet">the neck moves and the back does not. The head is
+      acting alone: shake, scratch, sniff.</span>
+    </div>
+  </div>
+  <div class="tt-quiet" style="margin-top:9px;font-size:11.5px">
+    Both sensors sample at 100 Hz. The dot on the cervical chain is the collar,
+    the dot on the thoracic chain is the harness, and the dashed arc between
+    them is the only feature in this build that needs two of them.
+  </div>
+</div>""", unsafe_allow_html=True)
 
         wave = rows(f"""
             SELECT sample_ts, neck_ax, neck_ay, neck_az,
@@ -2512,13 +2647,11 @@ def _page_1():
         # the only good reason to spend a 3D plot on anything.
         # ------------------------------------------------------------------
         if PLOTLY and wave and len(wave) > 30:
-            st.markdown("**The motion signature, in the three axes the collar "
-                        "actually measures**")
-            st.markdown('<span class="tt-quiet">Drag to rotate. One point per '
-                        '100 Hz sample, the line is time. Stillness knots around '
-                        'the gravity vector; a gait draws a repeating loop; a '
-                        'head shake smears along one axis.</span>',
-                        unsafe_allow_html=True)
+            panel("The motion signature, in the three axes the collar "
+                  "actually measures",
+                  "Drag to rotate. One point per 100 Hz sample, the line is "
+                  "time. Stillness knots around the gravity vector; a gait "
+                  "draws a repeating loop; a head shake smears along one axis.")
             ax = [float(r["NECK_AX"] or 0) for r in wave]
             ay = [float(r["NECK_AY"] or 0) for r in wave]
             az = [float(r["NECK_AZ"] or 0) for r in wave]
@@ -2609,9 +2742,20 @@ def _page_1():
                       "shake is a broad hump up at 5–9 Hz, and stillness is flat. "
                       "Height and colour are the same number — power in dB — so "
                       "nothing rests on judging a height by eye.")
+                # .tolist(), AND THIS IS HAZARD 1 AND 4 AGAIN.
+                #
+                # This was the one chart in the app handing plotly a numpy
+                # array instead of plain Python lists, and it rendered as an
+                # empty white box the height of the figure — no axes, no
+                # surface, nothing. plotly.py 6 encodes an ndarray as a
+                # base64 typed array (`bdata`), and the plotly.js bundled with
+                # the Streamlit build SiS pins does not decode it, so the trace
+                # arrives with no data and the scene never draws. Every other
+                # chart here is fed lists by rows(); this one bypassed that
+                # because the STFT is computed in the page.
                 fig = go.Figure(go.Surface(
                     x=t_ax, y=[float(f) for f in freqs[keep]],
-                    z=np.clip(spec, floor, None),
+                    z=np.clip(spec, floor, None).tolist(),
                     colorscale=[[0.0, "#FAFAF9"], [0.25, "#cde2fb"],
                                 [0.55, S_BLUE], [0.80, S_ORANGE],
                                 [1.0, "#7a1f06"]],
@@ -2640,6 +2784,9 @@ def _page_1():
                         # Not a cube: time is the long axis and squaring it
                         # would compress a 60 s record into the same width as
                         # a 20 Hz band, which is what makes ridges unreadable.
+                        # aspectmode said out loud rather than inferred — an
+                        # aspectratio under the default 'auto' is advisory.
+                        aspectmode="manual",
                         aspectratio=dict(x=1.9, y=1.0, z=0.62),
                         camera=dict(eye=dict(x=1.75, y=-1.5, z=0.95))),
                     paper_bgcolor=CARD, plot_bgcolor=CARD, showlegend=False,
@@ -3589,28 +3736,80 @@ def _page_4():
     else:
         dog = st.selectbox("dog", [int(r["DOG_ID"]) for r in dogs], key="base_dog")
 
+        # THE MOST RECENT EPOCHS, NOT THE FIRST FIVE THOUSAND.
+        #
+        # `ORDER BY epoch_ts LIMIT 5000` returns the OLDEST rows, so a dog with
+        # more than that showed its earliest history under a title that says
+        # "today". QUALIFY takes the newest window and the outer ORDER BY puts
+        # it back in reading order. 3,600 epochs is an hour of dog time, which
+        # is the window the caption has been claiming all along.
+        # A TIME BOUND AS WELL AS A ROW BOUND, and the time bound is the one
+        # that mattered. Some dogs' epochs are two recording sessions in
+        # January and one from this morning; a row cap alone keeps all three,
+        # so the x axis spanned seven months to show forty minutes of data and
+        # every session collapsed into a hairline at the edge of the plot.
+        # Six hours back from THAT DOG'S newest epoch — never from the wall
+        # clock, which would empty the chart for every bulk-corpus dog.
         dev = rows(f"""
             SELECT epoch_ts, activity_index, baseline_index, baseline_std,
                    z_self, z_cohort, cohort_mean, cohort_std, is_synthetic
             FROM MARTS.DOG_DEVIATION
             WHERE dog_id = {dog} AND baseline_index IS NOT NULL
+              AND epoch_ts >= DATEADD('hour', -6,
+                    (SELECT MAX(epoch_ts) FROM MARTS.DOG_DEVIATION
+                      WHERE dog_id = {dog} AND baseline_index IS NOT NULL))
+            QUALIFY ROW_NUMBER() OVER (ORDER BY epoch_ts DESC) <= 3600
             ORDER BY epoch_ts
-            LIMIT 5000
         """)
         if PLOTLY and dev:
-            xs = [str(r["EPOCH_TS"]) for r in dev]
-            base = [float(r["BASELINE_INDEX"] or 0) for r in dev]
-            sd = [float(r["BASELINE_STD"] or 0) for r in dev]
+            # BREAK THE LINE WHERE THE FEED BROKE.
+            #
+            # A bulk-corpus dog's epochs are a handful of recording sessions
+            # scattered across months, not one continuous hour. Drawn on a
+            # datetime axis with no breaks, each session collapsed into a
+            # vertical spike at the edge of the plot and plotly ran a straight
+            # line across the seven months between them — which read as a dog
+            # holding a perfectly constant activity index since February. It
+            # was drawing an absence as a measurement.
+            #
+            # None at each discontinuity, in x and in every series, so a gap in
+            # the record is a gap on the chart. Same principle as the ASOF JOIN
+            # this page is about: a hole degrades the comparison visibly rather
+            # than being filled in silently.
+            _brk = [False]
+            for _i in range(1, len(dev)):
+                _d = (dev[_i]["EPOCH_TS"] - dev[_i - 1]["EPOCH_TS"]).total_seconds()
+                _brk.append(_d > 5)
+
+            def _cut(seq):
+                out = []
+                for i, v in enumerate(seq):
+                    if _brk[i]:
+                        out.append(None)
+                    out.append(v)
+                return out
+
+            _segments = sum(_brk) + 1
+            xs = _cut([str(r["EPOCH_TS"]) for r in dev])
+            base = _cut([float(r["BASELINE_INDEX"] or 0) for r in dev])
+            sd = _cut([float(r["BASELINE_STD"] or 0) for r in dev])
             fig = go.Figure()
             # The ±2 SD band stays a flat grey fill and is NOT given a
             # gradient. It is a region of tolerance, not a quantity — a ramp
             # across it would imply the edges of normal are less normal than
             # the middle, which is the opposite of what two standard
             # deviations means.
-            fig.add_trace(go.Scatter(x=xs, y=[b + 2 * s for b, s in zip(base, sd)],
+            # None survives the arithmetic: a break in the band has to break
+            # the fill too, or the shaded region bridges the gap the line
+            # correctly refuses to.
+            def _band(k):
+                return [None if b is None or s is None else b + k * s
+                        for b, s in zip(base, sd)]
+
+            fig.add_trace(go.Scatter(x=xs, y=_band(2),
                                      mode="lines", line=dict(width=0),
                                      hoverinfo="skip", showlegend=False))
-            fig.add_trace(go.Scatter(x=xs, y=[b - 2 * s for b, s in zip(base, sd)],
+            fig.add_trace(go.Scatter(x=xs, y=_band(-2),
                                      mode="lines", line=dict(width=0), fill="tonexty",
                                      fillcolor=alpha("#A8A29E", 0.20),
                                      hoverinfo="skip", showlegend=False))
@@ -3622,73 +3821,105 @@ def _page_4():
             # is meant to follow, and the glow is what lifts a 1.5px line off
             # a grey band it spends most of its time inside.
             evil_area(
-                fig, xs, [float(r["ACTIVITY_INDEX"] or 0) for r in dev],
+                fig, xs, _cut([float(r["ACTIVITY_INDEX"] or 0) for r in dev]),
                 S_ORANGE, width=1.6, shape="linear", fill=None, cap=True,
-                text=[f'{fmt(r["ACTIVITY_INDEX"],3)}<br>z_self {fmt(r["Z_SELF"],2)}'
-                      f'{" · SYNTHETIC" if r.get("IS_SYNTHETIC") else ""}'
-                      for r in dev])
+                text=_cut([f'{fmt(r["ACTIVITY_INDEX"],3)}'
+                           f'<br>z_self {fmt(r["Z_SELF"],2)}'
+                           f'{" · SYNTHETIC" if r.get("IS_SYNTHETIC") else ""}'
+                           for r in dev]))
             fig.update_layout(
-                title="today against this dog's own trailing hour "
-                      "(shaded band = ±2 SD of its own normal)",
+                title="the most recent hour against this dog's own trailing "
+                      "baseline (shaded band = ±2 SD of its own normal)",
                 title_font_size=11)
             chart(evil_axes(fig, y_zero_line=False), H_MD)
             renderer_note(
                 "plotly · area",
                 f"{len(dev):,} epochs against a trailing baseline joined with "
-                f"ASOF JOIN. The band is the dog's own ±2 SD, so leaving it is "
-                f"abnormal FOR THIS DOG rather than abnormal for a dog.")
+                f"ASOF JOIN"
+                + (f", in {_segments} recording sessions — the line breaks "
+                   f"where the record does rather than interpolating across "
+                   f"the gap" if _segments > 1 else "")
+                + f". The band is the dog's own ±2 SD, so leaving it is "
+                  f"abnormal FOR THIS DOG rather than abnormal for a dog.")
 
         # The left column used to be a five-row table and a three-row table
         # against a full-height chart on the right — half the page ended 600px
         # above the other half. The cohort comparison is a DISTRIBUTION
         # question ("is this dog unusual for dogs like it"), and a distribution
         # answered with two averages is the weakest possible form of it.
+        # BOTH HALVES OF THIS ROW ARE ONE ROW PER DOG, SO THEY GET ONE HEIGHT.
+        #
+        # The box plot grew with the pack — 45 dogs at an 18px pitch is 560px —
+        # while the wall beside it was pinned at H_MD. The right column
+        # therefore stopped roughly 450px above the left and the tab had a
+        # column of white running down the middle of it. Everything this row
+        # needs is fetched before either column so the height can be decided
+        # once, which is the only way Streamlit columns ever line up.
+        summ = rows(f"""
+            SELECT ROUND(AVG(z_self),3) AS z_self, ROUND(AVG(z_cohort),3) AS z_cohort,
+                   ROUND(AVG(activity_index),4) AS idx,
+                   ROUND(AVG(cohort_mean),4) AS cohort_mean,
+                   ANY_VALUE(cohort_id) AS cohort
+            FROM MARTS.DOG_DEVIATION WHERE dog_id = {dog}
+        """)
+        peers = rows(f"""
+            SELECT dog_id, activity_index
+            FROM MARTS.DOG_DEVIATION
+            WHERE activity_index IS NOT NULL
+              AND cohort_id = (SELECT ANY_VALUE(cohort_id)
+                               FROM MARTS.DOG_DEVIATION WHERE dog_id = {dog})
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id
+                                       ORDER BY RANDOM()) <= 300
+        """)
+        # A cohort of one is a real outcome here — the bands are narrow and
+        # some dogs are the only animal in their weight/age cell. Drawing a
+        # single lonely box against no comparison looks like a broken chart
+        # rather than a fact, so widen to the whole pack and SAY SO instead
+        # of quietly implying this is the cohort.
+        alone = len({r["DOG_ID"] for r in peers}) < 3
+        if alone:
+            peers = rows("""
+                SELECT dog_id, activity_index
+                FROM MARTS.DOG_DEVIATION
+                WHERE activity_index IS NOT NULL
+                QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id
+                                           ORDER BY RANDOM()) <= 200
+            """)
+        by_dog: dict = {}
+        for r in peers:
+            by_dog.setdefault(int(r["DOG_ID"]), []).append(
+                float(r["ACTIVITY_INDEX"]))
+
+        wall = rows("""
+            SELECT dog_id, ROUND(AVG(ABS(z_self)),3) AS z_abs,
+                   ROUND(AVG(z_self),3) AS z_self, COUNT(*) AS n
+            FROM MARTS.DOG_DEVIATION
+            WHERE z_self IS NOT NULL
+            GROUP BY dog_id ORDER BY z_abs DESC
+        """)
+
+        # One row per dog on both sides, so one pitch and one height — plus the
+        # arithmetic for what sits UNDER each chart. The left column carries a
+        # five-row summary register that the right column does not, so the wall
+        # is given that height back; otherwise matching the two charts just
+        # moves the ragged edge down by the height of a table.
+        _pitch = 18
+        _row2 = row_h(len(by_dog), len(wall), row=_pitch)
+        _SUMMARY_H = 186        # the five-row register under the box plot
+
         c1, c2 = st.columns(2)
         with c1:
             panel("Against its cohort",
                   "Every dog in the same weight and age band, as a spread rather "
                   "than an average. This dog is the amber box.")
-            summ = rows(f"""
-                SELECT ROUND(AVG(z_self),3) AS z_self, ROUND(AVG(z_cohort),3) AS z_cohort,
-                       ROUND(AVG(activity_index),4) AS idx,
-                       ROUND(AVG(cohort_mean),4) AS cohort_mean,
-                       ANY_VALUE(cohort_id) AS cohort
-                FROM MARTS.DOG_DEVIATION WHERE dog_id = {dog}
-            """)
-            peers = rows(f"""
-                SELECT dog_id, activity_index
-                FROM MARTS.DOG_DEVIATION
-                WHERE activity_index IS NOT NULL
-                  AND cohort_id = (SELECT ANY_VALUE(cohort_id)
-                                   FROM MARTS.DOG_DEVIATION WHERE dog_id = {dog})
-                QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id
-                                           ORDER BY RANDOM()) <= 300
-            """)
-            # A cohort of one is a real outcome here — the bands are narrow and
-            # some dogs are the only animal in their weight/age cell. Drawing a
-            # single lonely box against no comparison looks like a broken chart
-            # rather than a fact, so widen to the whole pack and SAY SO instead
-            # of quietly implying this is the cohort.
-            alone = len({r["DOG_ID"] for r in peers}) < 3
             if alone:
-                peers = rows("""
-                    SELECT dog_id, activity_index
-                    FROM MARTS.DOG_DEVIATION
-                    WHERE activity_index IS NOT NULL
-                    QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id
-                                               ORDER BY RANDOM()) <= 200
-                """)
                 st.markdown(
                     '<div class="tt-caveat">This dog is the only one in its '
                     'weight and age band, so there is no cohort to compare it '
                     'against. Shown against <b>the whole pack</b> instead — a '
                     'weaker comparison, and labelled as one.</div>',
                     unsafe_allow_html=True)
-            if PLOTLY and peers:
-                by_dog: dict = {}
-                for r in peers:
-                    by_dog.setdefault(int(r["DOG_ID"]), []).append(
-                        float(r["ACTIVITY_INDEX"]))
+            if PLOTLY and by_dog:
                 fig = go.Figure()
                 for d in sorted(by_dog, key=lambda k: (k != dog, k)):
                     mine = d == dog
@@ -3703,7 +3934,7 @@ def _page_4():
                            if alone else
                            "activity index, this dog against its cohort"),
                     title_font_size=11)
-                chart(evil_axes(fig, y_zero_line=False, dotted="x"), bars(len(by_dog), row=18))
+                chart(evil_axes(fig, y_zero_line=False, dotted="x"), _row2)
             if summ:
                 s = summ[0]
                 html_table([
@@ -3714,38 +3945,49 @@ def _page_4():
                     {"k": "z vs cohort", "v": fmt(s["Z_COHORT"], 3)},
                 ], [("k", ""), ("v", "")])
 
-        wall = rows("""
-            SELECT dog_id, ROUND(AVG(ABS(z_self)),3) AS z_abs,
-                   ROUND(AVG(z_self),3) AS z_self, COUNT(*) AS n
-            FROM MARTS.DOG_DEVIATION
-            WHERE z_self IS NOT NULL
-            GROUP BY dog_id ORDER BY z_abs DESC
-        """)
-
         with c2:
             panel("The wall",
                   "Every dog, worst deviation first. Amber past 1 SD, red "
-                  "past 2 — the two dogs at the left end are the ward round.")
+                  "past 2 — the dogs at the top are the ward round.")
             if PLOTLY and wall:
+                # HORIZONTAL, LIKE THE CHART IT SHARES A ROW WITH.
+                #
+                # Vertically, forty-five dog labels have nowhere to go: plotly
+                # rotated them ninety degrees and the axis became a wall of
+                # sideways text that cost more height than the bars did.
+                # Horizontal gives every dog a readable label on one line, puts
+                # the worst offenders at the top where a ward round starts, and
+                # matches the row pitch of the box plot beside it so the two
+                # halves of this row finally end on the same line.
+                #
+                # Reversed, because plotly draws the first category at the
+                # BOTTOM of a horizontal axis and the query is worst-first.
+                _w = list(reversed(wall))
                 fig = go.Figure()
                 evil_bar(
-                    fig, [f'dog {int(r["DOG_ID"])}' for r in wall],
-                    [float(r["Z_SELF"] or 0) for r in wall],
+                    fig, [f'dog {int(r["DOG_ID"])}' for r in _w],
+                    [float(r["Z_SELF"] or 0) for r in _w],
                     [TRIAGE_COLOUR[3] if abs(r["Z_ABS"] or 0) > 2
                      else (S_ORANGE if abs(r["Z_ABS"] or 0) > 1
-                           else "#D6D3D1") for r in wall],
-                    horizontal=False,
+                           else "#D6D3D1") for r in _w],
+                    horizontal=True,
                     # NO TRACK ON THIS ONE. z_self is SIGNED and centred on
                     # zero; a track drawn from the axis to the longest bar
                     # would run the wrong way for every dog below baseline and
                     # imply zero is the floor rather than the middle.
                     track=False,
                     text=[f'dog {int(r["DOG_ID"])}<br>z {fmt(r["Z_SELF"],2)}<br>'
-                          f'{fmt(r["N"],0)} epochs' for r in wall])
-                fig.update_layout(title="mean deviation from own baseline, by dog "
-                                        "(amber > 1 SD, red > 2 SD)",
-                                  title_font_size=11)
-                chart(evil_axes(fig), H_MD)
+                          f'{fmt(r["N"],0)} epochs' for r in _w])
+                # The line every bar is read against. Zero is the dog's own
+                # baseline, not the bottom of a scale.
+                fig.add_vline(x=0, line=dict(color=INK_2, width=1))
+                fig.update_layout(
+                    title="mean deviation from own baseline, by dog "
+                          "(amber > 1 SD, red > 2 SD)",
+                    title_font_size=11,
+                    yaxis=dict(tickfont=dict(size=9.5)))
+                chart(evil_axes(fig, y_zero_line=False, dotted="x"),
+                      _row2 + _SUMMARY_H)
 
         # ------------------------------------------------------------------
         # THIRD ROW. The wall and the trajectory used to be STACKED in the
@@ -3861,36 +4103,136 @@ def _page_5():
             "never calls Cortex: a render path that costs credits is a render "
             "path that will exhaust a trial cap during a demo.")
     else:
-        # The caseload this note sits inside, before the note itself. Which
-        # syndromes generated notes, and how those notes were triaged — from
-        # the rows already fetched, so the overview costs nothing.
+        # The caseload this note sits inside, before the note itself.
+        # Everything here is folded out of the rows already fetched, so the
+        # overview costs no extra query.
+        _dogs = {n["DOG_ID"] for n in notes}
+        _conf = [float(n["CONFIDENCE"]) for n in notes
+                 if n.get("CONFIDENCE") is not None]
+        _pure = [float(n["MODEL_PURITY"]) for n in notes
+                 if n.get("MODEL_PURITY") is not None]
+        metric_strip([
+            ("notes cached",     fmt(len(notes), 0)),
+            ("dogs written up",  fmt(len(_dogs), 0)),
+            ("syndromes",        fmt(len({n["SYNDROME_CODE"] for n in notes}), 0)),
+            ("mean confidence",  fmt(sum(_conf) / len(_conf), 3) if _conf else "—"),
+            ("model-derived",    f"{100 * sum(_pure) / len(_pure):.0f}%"
+                                 if _pure else "—"),
+        ])
+
+        # ONE AGGREGATE, READ TWICE — ONCE AS A BAR AND ONCE AS A REGISTER.
+        #
+        # The caseload is lopsided by nature: ninety-odd of the notes are one
+        # gastrointestinal code and the rest are single figures. A vertical
+        # stack of four bars spent a hero's height drawing one wall and three
+        # slivers, with bare codes (S2, S6) on the axis that mean nothing to a
+        # reader who has not memorised REF.SYNDROMES. Horizontal and sorted
+        # gives every row its full name and its count where the eye already is
+        # — at the end of the bar — and the table underneath carries the three
+        # numbers a length cannot: how many distinct dogs, how confident the
+        # pattern engine was, and how much of it came from the model rather
+        # than the heuristic.
+        per: dict = {}
+        for n in notes:
+            e = per.setdefault(n["SYNDROME_CODE"], {
+                "name": n.get("SYNDROME_NAME") or n["SYNDROME_CODE"],
+                "system": n.get("BODY_SYSTEM") or "—",
+                "dogs": set(), "conf": [], "pure": [], "bands": {}, "n": 0})
+            e["n"] += 1
+            e["dogs"].add(n["DOG_ID"])
+            if n.get("CONFIDENCE") is not None:
+                e["conf"].append(float(n["CONFIDENCE"]))
+            if n.get("MODEL_PURITY") is not None:
+                e["pure"].append(float(n["MODEL_PURITY"]))
+            _b = (n.get("TRIAGE_LABEL") or "not yet triaged", n.get("SEVERITY"))
+            e["bands"][_b] = e["bands"].get(_b, 0) + 1
+
+        def _mean(xs, nd=3):
+            return fmt(sum(xs) / len(xs), nd) if xs else "—"
+
         k1, k2 = st.columns(2)
 
         with k1:
             panel("The caseload these notes came from",
-                  "Every cached note, by syndrome and by the triage band "
-                  "AI_CLASSIFY assigned it. Read the bar first, then pick a "
-                  "note out of it.")
+                  "Every cached note by syndrome, split into the triage bands "
+                  "AI_CLASSIFY assigned. Read the bar, then pick a note out of "
+                  "it in the picker below.")
             if PLOTLY:
-                codes = sorted({n["SYNDROME_CODE"] for n in notes})
+                # Ascending, because plotly draws the first category at the
+                # BOTTOM of a horizontal axis — so ascending here is descending
+                # on screen, which is the order the reader expects.
+                asc = sorted(per.items(), key=lambda kv: kv[1]["n"])
+                ticks = [
+                    f'{e["name"][:30] + ("…" if len(e["name"]) > 30 else "")}'
+                    f'<br><span style="font-size:9px">{c} · {e["system"]}</span>'
+                    for c, e in asc]
                 sevs = sorted({n.get("SEVERITY") for n in notes},
-                              key=lambda s: -(s or 0))
+                              key=lambda s: (s is None, -(s or 0)))
                 fig = go.Figure()
                 for sev in sevs:
-                    bucket = [n for n in notes if n.get("SEVERITY") == sev]
-                    lbl = (bucket[0].get("TRIAGE_LABEL") if bucket else None) or "untriaged"
-                    ys = [sum(1 for n in bucket if n["SYNDROME_CODE"] == c) for c in codes]
+                    lbl = next((n.get("TRIAGE_LABEL") for n in notes
+                                if n.get("SEVERITY") == sev), None) or "not yet triaged"
+                    xs = [e["bands"].get((lbl, sev), 0) for _, e in asc]
                     fig.add_trace(go.Bar(
-                        x=codes, y=ys, name=str(lbl),
-                        marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E")),
-                        hovertext=[f"{c} · {lbl}: {y} notes" for c, y in zip(codes, ys)],
+                        x=xs, y=ticks, orientation="h", name=str(lbl), width=0.56,
+                        marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E"),
+                                    line=dict(width=0)),
+                        hovertext=[f'{e["name"]} · {lbl}: {x} of {e["n"]} notes'
+                                   for (_, e), x in zip(asc, xs)],
                         hoverinfo="text"))
-                fig.update_layout(barmode="stack", showlegend=True,
-                                  legend=dict(orientation="h", y=-0.18,
-                                              font=dict(size=10)),
-                                  title="cached notes by syndrome, stacked by triage band",
-                                  title_font_size=11)
-                chart(evil_axes(fig), H_LG)
+                _top = max(e["n"] for _, e in asc)
+                # THE TRACK, AS SHAPES RATHER THAN A TRACE. evil_bar draws the
+                # faint full-length slot behind each bar with an extra Bar in
+                # overlay mode, which a stacked chart cannot use — an overlay
+                # track would stack onto the bands. Rectangles at the same
+                # half-width as the bars give the same reading: a syndrome with
+                # three notes next to one with ninety still has a visible row
+                # rather than a smear at the origin.
+                fig.update_layout(
+                    barmode="stack", bargap=0.42, showlegend=True,
+                    shapes=[dict(type="rect", xref="x", yref="y",
+                                 x0=0, x1=_top * 1.30, y0=i - 0.28, y1=i + 0.28,
+                                 fillcolor=GRID, line=dict(width=0), layer="below")
+                            for i in range(len(asc))],
+                    legend=dict(orientation="h", y=-0.16, x=0, font=dict(size=10)),
+                    # No axis title: the panel line above and the byline below
+                    # both already say what a bar's length is, and a third copy
+                    # would land in the same 46px the legend is standing in.
+                    xaxis=dict(range=[0, _top * 1.30]),
+                    yaxis=dict(tickfont=dict(size=10.5)),
+                    # The count at the end of the bar rather than on the axis:
+                    # a stacked bar cannot be read off a gridline anyway, and
+                    # the share is the number a reader actually wants next to
+                    # a caseload this lopsided.
+                    annotations=[
+                        dict(x=e["n"], y=t, text=f'<b>{e["n"]}</b>'
+                                                 f'<span style="font-size:9.5px">'
+                                                 f'&nbsp;&nbsp;{100 * e["n"] / len(notes):.0f}%'
+                                                 f'</span>',
+                             xanchor="left", xshift=7, yanchor="middle",
+                             showarrow=False, font=dict(size=11.5, color=INK))
+                        for (_, e), t in zip(asc, ticks)])
+                if HAS_BARRADIUS:
+                    fig.update_layout(barcornerradius=3)
+                chart(evil_axes(fig, y_zero_line=False, dotted="x"),
+                      bars(len(asc), row=42))
+                html_table(
+                    [{"s": f'<b>{esc(e["name"])}</b> '
+                           f'<span class="tt-quiet">{c}</span>',
+                      "y": e["system"],
+                      "n": fmt(e["n"], 0),
+                      "d": fmt(len(e["dogs"]), 0),
+                      "c": _mean(e["conf"]),
+                      "m": _mean(e["pure"])}
+                     for c, e in sorted(per.items(), key=lambda kv: -kv[1]["n"])],
+                    [("s", "syndrome"), ("y", "body system"), ("n", "notes"),
+                     ("d", "dogs"), ("c", "mean conf."), ("m", "model-derived")])
+                renderer_note(
+                    "plotly · stacked bar",
+                    f"{len(notes)} notes over {len(per)} syndromes. Length is "
+                    f"the count and colour is the triage band, so a syndrome "
+                    f"that is common and a syndrome that is urgent are two "
+                    f"different readings of the same row.")
 
         with k2:
             panel("Did the triage agree with the measurements?",
@@ -3944,10 +4286,15 @@ def _page_5():
                     f"is generated — so the two can be seen to agree rather "
                     f"than being asserted to.")
 
+        st.markdown("---")
+        panel("The note itself",
+              f"{len(notes)} cached notes, most severe first. Every one below "
+              f"this line is about the single finding picked here.")
         labels = [f'{n["SYNDROME_CODE"]} · dog {n["DOG_ID"]} · '
                   f'{str(n["ONSET_TS"])[:19]} · {n["TRIAGE_LABEL"]}' for n in notes]
         i = st.selectbox("finding", range(len(labels)),
-                         format_func=lambda k: labels[k], key="note_pick")
+                         format_func=lambda k: labels[k], key="note_pick",
+                         label_visibility="collapsed")
         n = notes[i]
         colour = TRIAGE_COLOUR.get(n.get("SEVERITY"), "#A8A29E")
 
@@ -3999,7 +4346,10 @@ def _page_5():
         # played, so the prose can be checked against the rows it came from.
         # AI.V_VET_NOTE_FULL does not carry test_num or match_id, so the match
         # is resolved by its onset — the key the note itself displays.
-        st.markdown("**The sequence this note is describing**")
+        panel("The sequence this note is describing",
+              "The matched seconds themselves, each epoch coloured by the "
+              "pattern variable it played. The prose above is checkable "
+              "against this ribbon.")
         key = rows(f"""
             SELECT test_num, match_id FROM MARTS.SYNDROME_MATCHES
             WHERE dog_id = {n['DOG_ID']}
@@ -4016,7 +4366,9 @@ def _page_5():
 
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**Evidence, linked to the epoch range**")
+            panel("Evidence, linked to the epoch range",
+                  "Every claim the note makes, next to the measurement it was "
+                  "made from.")
             ev = n.get("EVIDENCE")
             trows = [
                 {"k": "matched window", "v": f'{str(n["ONSET_TS"])[:19]} → '
@@ -4037,10 +4389,25 @@ def _page_5():
                     pass
             html_table(trows, [("k", "claim"), ("v", "value")])
         with c2:
-            st.markdown("**Pattern**")
-            st.code(f"PATTERN ( {n['PATTERN_TEXT']} )", language="sql")
+            panel("The rule that fired",
+                  "The MATCH_RECOGNIZE clause this note came out of, printed "
+                  "in full.")
+            # PATTERN WITHOUT DEFINE IS HALF A RULE. `PATTERN ( A B+ C )` says
+            # nothing on its own — the meaning of the note is entirely in what
+            # A, B and C were defined to be, and the view already carries it.
+            # This is the same rendering the Syndromes tab uses, so a reader
+            # who has seen one recognises the other.
+            _def = str(n.get("DEFINE_TEXT") or "").strip()
+            st.code(
+                f"PATTERN ( {n['PATTERN_TEXT']} )"
+                + ("\nDEFINE\n    " + ",\n    ".join(
+                    x.strip() for x in _def.split(",")) if _def else ""),
+                language="sql")
             st.markdown(
-                f'<div class="tt-quiet">{n.get("WHY_NOT_THRESHOLD","")}</div>',
+                f'<div class="tt-card"><div class="tt-metric-label">'
+                f'why a sequence and not a threshold</div>'
+                f'<div style="font-size:12px;line-height:1.5;margin-top:4px">'
+                f'{n.get("WHY_NOT_THRESHOLD","")}</div></div>',
                 unsafe_allow_html=True)
 
         st.markdown(
@@ -4644,31 +5011,128 @@ warehouse noticed on day two.</b>
                 'city shelter.</div>', unsafe_allow_html=True)
 
         # ------------------------------------------------------------------
-        # FOURTH ROW — the numbers behind both halves, paired so neither
-        # table overhangs the other.
+        # FOURTH ROW — the numbers behind both halves.
+        #
+        # THE LAYOUT BUG WAS IN THE PAIRING ITSELF. table_pair() trimmed both
+        # tables to the LONGER of the two, which pairs nothing: the left table
+        # has forty rows and the right has one per syndrome — six, and it will
+        # always be six, because REF.SYNDROMES has six — so the row drew 18
+        # against 6 and the tab ended in a column of table beside a column of
+        # white. A short table cannot be padded and a long one should not be
+        # deleted down to it, so the long side keeps every row inside a scroll
+        # box whose height is what makes the two columns finish together.
+        #
+        # And a forty-row register is a thing to interrogate, not to read top
+        # to bottom, so it gets the three controls that make it answerable:
+        # which condition, which breed group, and in what order. All three
+        # filter rows already in memory — the query behind them is cached and
+        # does not run again, so a dropdown costs a rerender and nothing else.
         # ------------------------------------------------------------------
-        _los_rows, _punch_rows, _trimmed = table_pair(los, punch, cap=18)
+        # One box height for the row. The left table overflows it and scrolls;
+        # the right one is shorter than it and the box shrinks to fit, so the
+        # card underneath is what brings that column down to the same line.
+        TALL = 300
         t1, t2 = st.columns(2)
         with t1:
             panel("Length of stay, in full",
-                  f"{'the ' + str(len(_los_rows)) + ' longest waits' if _trimmed else 'every cell'} "
-                  f"with at least 50 animals")
-            if _los_rows:
-                html_table([{"b": r["BREED_GROUP"], "c": r["INTAKE_CONDITION"],
-                             "d": fmt(r["MEDIAN_LOS_DAYS"], 1), "n": fmt(r["N"], 0)}
-                            for r in _los_rows],
-                           [("b", "breed group"), ("c", "intake condition"),
-                            ("d", "median LOS"), ("n", "n")])
+                  "Every breed-group × condition cell with at least 50 animals. "
+                  "Filter it, sort it; the box scrolls and nothing is dropped.")
+            conds = sorted({str(r["INTAKE_CONDITION"]) for r in los})
+            groups = sorted({str(r["BREED_GROUP"]) for r in los})
+            q1, q2, q3 = st.columns(3)
+            _cond = q1.selectbox("condition", ["all conditions"] + conds,
+                                 key="los_cond")
+            _grp = q2.selectbox("breed group", ["all breed groups"] + groups,
+                                key="los_grp")
+            _how = q3.selectbox("sort by", ["longest wait", "shortest wait",
+                                            "most animals", "breed group"],
+                                key="los_sort")
+            view = [r for r in los
+                    if (_cond == "all conditions"
+                        or str(r["INTAKE_CONDITION"]) == _cond)
+                    and (_grp == "all breed groups"
+                         or str(r["BREED_GROUP"]) == _grp)]
+            _key = {
+                "longest wait":  lambda r: -float(r["MEDIAN_LOS_DAYS"] or 0),
+                "shortest wait": lambda r: float(r["MEDIAN_LOS_DAYS"] or 0),
+                "most animals":  lambda r: -float(r["N"] or 0),
+                "breed group":   lambda r: (str(r["BREED_GROUP"]),
+                                            str(r["INTAKE_CONDITION"])),
+            }[_how]
+            view = sorted(view, key=_key)
+            if view:
+                # The bar in the median-LOS cell is scaled to the longest wait
+                # in the WHOLE table rather than to the current filter, so
+                # narrowing to one condition does not silently rescale the
+                # column and make a nine-day wait look like a forty-day one.
+                _span = max(float(r["MEDIAN_LOS_DAYS"] or 0) for r in los) or 1.0
+                _nmax = max(float(r["N"] or 0) for r in los) or 1.0
+
+                def _hue(r) -> str:
+                    return (S_ORANGE
+                            if str(r["INTAKE_CONDITION"] or "").upper()
+                            in ("BEHAVIOR", "BEHAVIOUR") else "#D6D3D1")
+
+                scroll_table(
+                    [{"b": r["BREED_GROUP"], "c": r["INTAKE_CONDITION"],
+                      "d": cell_bar(r["MEDIAN_LOS_DAYS"], _span, _hue(r), 1),
+                      "n": cell_bar(r["N"], _nmax, BORDER)} for r in view],
+                    [("b", "breed group"), ("c", "intake condition"),
+                     ("d", "median LOS, days"), ("n", "animals")],
+                    height=TALL)
+                st.markdown(
+                    f'<div class="tt-quiet" style="margin-top:6px">'
+                    f'{len(view)} of {len(los)} cells shown · '
+                    f'{fmt(sum(float(r["N"] or 0) for r in view), 0)} animals '
+                    f'behind them · bars are scaled to the longest wait in the '
+                    f'full table, not to this filter.</div>',
+                    unsafe_allow_html=True)
+            else:
+                empty_state("No cell matches that combination.",
+                            "Only breed-group × condition pairs with at least "
+                            "50 animals are kept, so most combinations are "
+                            "genuinely absent rather than hidden.")
         with t2:
             panel("The same categories, counted twice",
-                  "detected on a collar against written down at intake")
-            if _punch_rows:
-                html_table([{"c": r["SYNDROME_CODE"], "s": r["SYNDROME_NAME"],
-                             "t": fmt(r["TELLTAIL_DETECTIONS"], 0),
-                             "a": fmt(r["SHELTER_BEHAVIOUR_RECORDS"], 0)}
-                            for r in _punch_rows],
-                           [("c", "code"), ("s", "syndrome"),
-                            ("t", "collar"), ("a", "shelter")])
+                  "Detected on a collar against written down at intake. The "
+                  "two counts are NOT a ratio — read each bar against its own "
+                  "column.")
+            if punch:
+                _tmax = max(float(r["TELLTAIL_DETECTIONS"] or 0) for r in punch) or 1.0
+                _smax = max(float(r["SHELTER_BEHAVIOUR_RECORDS"] or 0) for r in punch) or 1.0
+                scroll_table(
+                    [{"c": r["SYNDROME_CODE"],
+                      "s": r["SYNDROME_NAME"],
+                      "t": cell_bar(r["TELLTAIL_DETECTIONS"], _tmax, INK),
+                      "a": cell_bar(r["SHELTER_BEHAVIOUR_RECORDS"], _smax,
+                                    S_ORANGE)}
+                     for r in punch],
+                    [("c", "code"), ("s", "syndrome"),
+                     ("t", "collar"), ("a", "shelter")],
+                    height=TALL)
+                st.markdown(
+                    f'<div class="tt-quiet" style="margin-top:6px">'
+                    f'{fmt(sum(float(r["TELLTAIL_DETECTIONS"] or 0) for r in punch), 0)} '
+                    f'collar detections over {len(punch)} syndromes against '
+                    f'{fmt(sum(float(r["SHELTER_BEHAVIOUR_RECORDS"] or 0) for r in punch), 0)} '
+                    f'shelter records. Each column is scaled to its own column '
+                    f'— a handful of dogs for a few days is not a decade of a '
+                    f'city.</div>', unsafe_allow_html=True)
+                st.markdown(f"""
+<div class="tt-card" style="margin-top:10px">
+  <div class="tt-metric-label">how to read this pair</div>
+  <div style="font-size:12px;line-height:1.6;margin-top:5px">
+    A zero in the <b>collar</b> column is a syndrome no dog in this study
+    happened to show — 45 dogs over a few days is not a survey. A zero in the
+    <b>shelter</b> column is the opposite claim: Austin has no intake reason
+    that maps to it, so a decade of records cannot count it however often it
+    happened.
+    <br><br>
+    The row that matters is the one with a number on both sides. It is the
+    same behaviour, described once by a collar before anyone was worried and
+    once by an intake form after the relationship had already ended.
+  </div>
+</div>""", unsafe_allow_html=True)
 
 
 # ===========================================================================
@@ -4686,13 +5150,18 @@ def _page_8():
             ("on chain",         fmt(s.get("ATTESTATIONS_ONCHAIN"), 0)),
         ])
 
+    # Both charts in the first row get ONE height, decided before either is
+    # drawn — the lag chart grows a bar per Dynamic Table and the credit burn
+    # does not, so whichever is fixed becomes the short side of the row.
+    lag = rows("SELECT * FROM MARTS.V_DAG_LAG ORDER BY schema_name, object_name")
+    _rowh = row_h(len(lag))
+
     c1, c2 = st.columns(2)
 
     with c1:
         panel("Dynamic Table refresh lag",
               "Declared target lag against observed. No cron anywhere in the "
               "feature, state, transition or baseline layers.")
-        lag = rows("SELECT * FROM MARTS.V_DAG_LAG ORDER BY schema_name, object_name")
         if PLOTLY and lag:
             # PLOTTED AS A RATIO, NOT IN SECONDS.
             #
@@ -4736,16 +5205,8 @@ def _page_8():
                            tickvals=[0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50],
                            ticktext=["0.1×", "0.25×", "0.5×", "1× target",
                                      "2×", "5×", "10×", "25×", "50×"]))
-            chart(evil_axes(fig, y_zero_line=False, dotted="x"), bars(len(names)))
-        if lag:
-            html_table([{"o": f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}',
-                         "t": fmt(r["TARGET_LAG_SEC"], 0),
-                         "m": fmt(r["MEAN_LAG_SEC"], 1),
-                         "x": fmt(r["MAXIMUM_LAG_SEC"], 1),
-                         "s": r["STATE"]} for r in lag],
-                       [("o", "object"), ("t", "target s"), ("m", "mean s"),
-                        ("x", "max s"), ("s", "state")])
-        else:
+            chart(evil_axes(fig, y_zero_line=False, dotted="x"), _rowh)
+        elif not lag:
             empty_state("No refresh history yet.",
                         "Dynamic Tables report after their first refresh.")
 
@@ -4764,19 +5225,72 @@ def _page_8():
                       f'{fmt(r["CUMULATIVE_CREDITS"],3)} cumulative' for r in cb])
             fig.update_layout(title="cumulative credits, 7 days (trial grant is 400)",
                               title_font_size=11)
-            chart(evil_axes(fig), H_MD)
+            # THE SAME HEIGHT AS THE CHART BESIDE IT, not H_MD. The lag chart
+            # grows with the number of Dynamic Tables and this one does not, so
+            # a fixed height on one side of the row is a gap waiting to happen.
+            chart(evil_axes(fig), _rowh)
         else:
             empty_state("No credit history yet.",
                         "MARTS.V_CREDIT_BURN reads the account usage views.")
 
     # ----------------------------------------------------------------------
-    # THE FOUR OPERATIONAL TABLES, PAIRED.
+    # THE OPERATIONAL REGISTERS.
     #
-    # These were four tables stacked in the left column against three sections
-    # in the right, so the halves of this page ended about a screen apart and
-    # the tab finished with a column of parameters against nothing. Two rows of
-    # two, each pairing a table with a table of similar length.
+    # THIS IS WHERE THE TAB WAS RAGGED. Every row here paired a table that is
+    # three rows long by construction — one per ML routine, one per AI Function
+    # — against one that is forty or five hundred, and a table cannot be padded
+    # to meet its partner. So the long ones are boxed: they keep every row they
+    # queried, the box is the height, and both halves of a row now end on the
+    # same line. Short against short, long against long, and the 44-row
+    # parameter register goes full width where its descriptions have room to
+    # sit on one line instead of wrapping to four.
     # ----------------------------------------------------------------------
+    BOX = 300
+    b1, b2 = st.columns(2)
+
+    with b1:
+        panel("Dynamic Table lag, in full",
+              "Declared target against observed, for every object in the DAG.")
+        if lag:
+            _tmax = max(float(r.get("MAXIMUM_LAG_SEC") or 0) for r in lag) or 1.0
+            scroll_table(
+                [{"o": f'{r["SCHEMA_NAME"]}.{r["OBJECT_NAME"]}',
+                  "t": fmt(r["TARGET_LAG_SEC"], 0),
+                  "m": fmt(r["MEAN_LAG_SEC"], 1),
+                  "x": cell_bar(r["MAXIMUM_LAG_SEC"], _tmax,
+                                "#B91C1C" if (float(r.get("MAXIMUM_LAG_SEC") or 0)
+                                              > float(r.get("TARGET_LAG_SEC") or 0) > 0)
+                                else BORDER, 1),
+                  "s": r["STATE"]} for r in lag],
+                [("o", "object"), ("t", "target s"), ("m", "mean s"),
+                 ("x", "max s"), ("s", "state")], height=BOX)
+        else:
+            empty_state("No refresh history yet.",
+                        "Dynamic Tables report after their first refresh.")
+
+    with b2:
+        panel("Task history",
+              "The forty most recent scheduled runs, newest first. Every number "
+              "on every other tab was written by one of these.")
+        th = rows("SELECT task_name, state, scheduled_time, duration_ms, return_value, "
+                  "error_message FROM MARTS.V_TASK_HISTORY "
+                  "ORDER BY scheduled_time DESC LIMIT 40")
+        if th:
+            _dmax = max(float(r.get("DURATION_MS") or 0) for r in th) or 1.0
+            scroll_table(
+                [{"t": r["TASK_NAME"],
+                  "s": r["STATE"],
+                  "w": str(r["SCHEDULED_TIME"])[:19],
+                  "d": cell_bar(r["DURATION_MS"], _dmax,
+                                "#B91C1C" if str(r["STATE"]).upper() == "FAILED"
+                                else BORDER),
+                  "r": str(r["RETURN_VALUE"] or r["ERROR_MESSAGE"] or "")[:70]}
+                 for r in th],
+                [("t", "task"), ("s", "state"), ("w", "scheduled"),
+                 ("d", "ms"), ("r", "returned")], height=BOX)
+        else:
+            empty_state("No task runs yet.", "Tasks resume at the end of 11_tasks.sql.")
+
     g1, g2 = st.columns(2)
 
     with g1:
@@ -4789,30 +5303,16 @@ def _page_8():
                          "d": str(r["DETAIL"] or "")[:80]} for r in fs],
                        [("f", "function"), ("s", "status"), ("n", "rows"),
                         ("d", "detail")])
+            st.markdown('<span class="tt-quiet">SNOWFLAKE.ML.ANOMALY_DETECTION, '
+                        'FORECAST and TOP_INSIGHTS, each run by a task and each '
+                        'landing in a table. A status here is the routine\'s own '
+                        'report, not a claim this page makes about it.</span>',
+                        unsafe_allow_html=True)
         else:
             empty_state("No ML runs recorded.",
                         "ML.FUNCTION_STATUS is written by the modelling procs.")
 
     with g2:
-        panel("Task history",
-              "The forty most recent scheduled runs, newest first.")
-        th = rows("SELECT task_name, state, scheduled_time, duration_ms, return_value, "
-                  "error_message FROM MARTS.V_TASK_HISTORY "
-                  "ORDER BY scheduled_time DESC LIMIT 40")
-        if th:
-            html_table([{"t": r["TASK_NAME"], "s": r["STATE"],
-                         "w": str(r["SCHEDULED_TIME"])[:19],
-                         "d": fmt(r["DURATION_MS"], 0),
-                         "r": str(r["RETURN_VALUE"] or r["ERROR_MESSAGE"] or "")[:70]}
-                        for r in th],
-                       [("t", "task"), ("s", "state"), ("w", "scheduled"),
-                        ("d", "ms"), ("r", "returned")])
-        else:
-            empty_state("No task runs yet.", "Tasks resume at the end of 11_tasks.sql.")
-
-    h1, h2 = st.columns(2)
-
-    with h1:
         panel("Cortex usage",
               "Every AI Function call the build has made, by function.")
         us = rows("SELECT * FROM AI.V_USAGE_SUMMARY")
@@ -4832,18 +5332,37 @@ def _page_8():
             empty_state("No Cortex calls recorded.",
                         "AI.V_USAGE_SUMMARY aggregates the AI layer's own log.")
 
-    with h2:
-        panel("Parameters",
-              "Every threshold in the build. No magic numbers live in SQL.")
-        pr = rows("SELECT key, COALESCE(TO_VARCHAR(value_num), value_str) AS v, unit, "
-                  "description FROM REF.PARAMS ORDER BY key")
-        if pr:
-            html_table([{"k": r["KEY"], "v": r["V"], "u": r["UNIT"],
-                         "d": str(r["DESCRIPTION"])[:90]} for r in pr],
-                       [("k", "key"), ("v", "value"), ("u", "unit"),
-                        ("d", "what it does")])
+    panel("Parameters",
+          "Every threshold in the build, full width because 44 of them with a "
+          "sentence each do not fit in half. No magic numbers live in SQL.")
+    pr = rows("SELECT key, COALESCE(TO_VARCHAR(value_num), value_str) AS v, unit, "
+              "description FROM REF.PARAMS ORDER BY key")
+    if pr:
+        _q = st.text_input(
+            "filter parameters", key="param_q", label_visibility="collapsed",
+            placeholder="filter by key, unit or description — e.g. solana, "
+                        "baseline, epochs")
+        _needle = (_q or "").strip().lower()
+        _pv = [r for r in pr
+               if not _needle
+               or _needle in f'{r["KEY"]} {r["V"]} {r["UNIT"]} {r["DESCRIPTION"]}'.lower()]
+        if _pv:
+            scroll_table([{"k": f'<span class="tt-mono">{r["KEY"]}</span>',
+                           "v": f'<b>{r["V"]}</b>', "u": r["UNIT"],
+                           "d": r["DESCRIPTION"]} for r in _pv],
+                         [("k", "key"), ("v", "value"), ("u", "unit"),
+                          ("d", "what it does")], height=360)
+            st.markdown(
+                f'<div class="tt-quiet" style="margin-top:6px">'
+                f'{len(_pv)} of {len(pr)} parameters · every one of them is read '
+                f'by the SQL at runtime, so changing a row here changes the '
+                f'build rather than describing it.</div>',
+                unsafe_allow_html=True)
         else:
-            empty_state("No parameters.", "REF.PARAMS is seeded by 02_ref_seed.sql.")
+            empty_state(f'No parameter matches "{esc(_q)}".',
+                        "REF.PARAMS holds 44 keys; try a shorter fragment.")
+    else:
+        empty_state("No parameters.", "REF.PARAMS is seeded by 02_ref_seed.sql.")
 
     # ------------------------------------------------------------------
     # WHO PUBLISHES, AND HOW FAR EACH CLAIM GOT.
