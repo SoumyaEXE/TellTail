@@ -3694,42 +3694,95 @@ def _page_4():
                     {"k": "z vs cohort", "v": fmt(s["Z_COHORT"], 3)},
                 ], [("k", ""), ("v", "")])
 
+        wall = rows("""
+            SELECT dog_id, ROUND(AVG(ABS(z_self)),3) AS z_abs,
+                   ROUND(AVG(z_self),3) AS z_self, COUNT(*) AS n
+            FROM MARTS.DOG_DEVIATION
+            WHERE z_self IS NOT NULL
+            GROUP BY dog_id ORDER BY z_abs DESC
+        """)
+
         with c2:
-            st.markdown("**The wall**")
-            st.markdown('<span class="tt-quiet">Every dog, worst deviation first. '
-                        'A grid of sparklines where three are obviously wrong.'
-                        '</span>', unsafe_allow_html=True)
-            wall = rows("""
-                SELECT dog_id, ROUND(AVG(ABS(z_self)),3) AS z_abs,
-                       ROUND(AVG(z_self),3) AS z_self, COUNT(*) AS n
-                FROM MARTS.DOG_DEVIATION
-                WHERE z_self IS NOT NULL
-                GROUP BY dog_id ORDER BY z_abs DESC
-            """)
+            panel("The wall",
+                  "Every dog, worst deviation first. Amber past 1 SD, red "
+                  "past 2 — the two dogs at the left end are the ward round.")
             if PLOTLY and wall:
-                fig = go.Figure(go.Bar(
-                    x=[f'dog {int(r["DOG_ID"])}' for r in wall],
-                    y=[float(r["Z_SELF"] or 0) for r in wall],
-                    marker=dict(color=[TRIAGE_COLOUR[3] if abs(r["Z_ABS"] or 0) > 2
-                                       else (S_ORANGE if abs(r["Z_ABS"] or 0) > 1
-                                             else "#D6D3D1") for r in wall]),
-                    hovertext=[f'dog {int(r["DOG_ID"])}<br>z {fmt(r["Z_SELF"],2)}<br>'
-                          f'{fmt(r["N"],0)} epochs' for r in wall],
-                    hoverinfo="text"))
+                fig = go.Figure()
+                evil_bar(
+                    fig, [f'dog {int(r["DOG_ID"])}' for r in wall],
+                    [float(r["Z_SELF"] or 0) for r in wall],
+                    [TRIAGE_COLOUR[3] if abs(r["Z_ABS"] or 0) > 2
+                     else (S_ORANGE if abs(r["Z_ABS"] or 0) > 1
+                           else "#D6D3D1") for r in wall],
+                    horizontal=False,
+                    # NO TRACK ON THIS ONE. z_self is SIGNED and centred on
+                    # zero; a track drawn from the axis to the longest bar
+                    # would run the wrong way for every dog below baseline and
+                    # imply zero is the floor rather than the middle.
+                    track=False,
+                    text=[f'dog {int(r["DOG_ID"])}<br>z {fmt(r["Z_SELF"],2)}<br>'
+                          f'{fmt(r["N"],0)} epochs' for r in wall])
                 fig.update_layout(title="mean deviation from own baseline, by dog "
                                         "(amber > 1 SD, red > 2 SD)",
                                   title_font_size=11)
-                chart(clean_axes(fig), H_MD)
+                chart(evil_axes(fig), H_MD)
 
+        # ------------------------------------------------------------------
+        # THIRD ROW. The wall and the trajectory used to be STACKED in the
+        # right column against a table in the left, which is how this page
+        # came to end with 600px of one column against nothing. They are two
+        # different questions — where a dog is, and where it is going — and
+        # they get a row each half.
+        # ------------------------------------------------------------------
+        e1, e2 = st.columns(2)
+
+        with e1:
+            panel("This dog's path out of its own normal",
+                  "The hero chart above, with deviation lifted into a third "
+                  "axis. Flat on the floor is a dog inside its baseline; "
+                  "height in either direction is how far out it went.")
+            if PLOTLY and dev:
+                # WHY THIS IS THREE VARIABLES AND NOT TWO DRESSED UP.
+                #
+                # z_self is NOT a restatement of activity_index. It is the
+                # activity against the dog's own trailing mean AND standard
+                # deviation, so the same index reads as z = 0.2 in an hour the
+                # dog was varying a lot and z = 3 in an hour it was steady.
+                # The 2D chart above can show the index against a band, or the
+                # z, but not both at once — which is the whole reason the band
+                # has to be drawn to make the top chart readable at all.
+                _z = [float(r["Z_SELF"] or 0) for r in dev]
+                _a = [float(r["ACTIVITY_INDEX"] or 0) for r in dev]
+                _t = list(range(len(dev)))
+                fig = go.Figure()
+                fig.add_trace(go.Scatter3d(
+                    x=_t, y=_a, z=_z, mode="lines",
+                    line=dict(color=[abs(v) for v in _z], width=4,
+                              colorscale=[[0, "#D6D3D1"], [0.5, S_ORANGE],
+                                          [1, TRIAGE_COLOUR[3]]],
+                              cmin=0, cmax=max([abs(v) for v in _z] or [1])),
+                    text=[f'{str(r["EPOCH_TS"])[:19]}'
+                          f'<br>index {fmt(r["ACTIVITY_INDEX"],3)}'
+                          f'<br>z_self {fmt(r["Z_SELF"],2)}' for r in dev],
+                    hoverinfo="text", showlegend=False))
+                scene3d(fig, "epoch", "activity index", "z vs own baseline",
+                        eye=(1.7, 1.3, 0.7))
+                chart3d(fig, H_LG)
+                renderer_note(
+                    "plotly · 3D",
+                    f"{len(dev):,} epochs as one continuous path. Colour is "
+                    f"|z|, so the stretch where the line lifts AND reddens is "
+                    f"the same stretch the 2D chart shows leaving the band.")
+
+        with e2:
             # Where each dog is HEADING, not just where it is. ML.FORECAST
             # projects the activity index forward per dog; drawn as a dumbbell
             # so the length of the connector is the size of the move and its
             # colour is the direction — a column of numbers hides both.
-            st.markdown("**Projected trajectory, every dog**")
-            st.markdown('<span class="tt-quiet">Hollow dot is where the dog is '
-                        'now, solid dot is where ML.FORECAST puts it. Amber '
-                        'connectors are dogs winding down.</span>',
-                        unsafe_allow_html=True)
+            panel("Projected trajectory, every dog",
+                  "Hollow dot is where the dog is now, solid dot is where "
+                  "ML.FORECAST puts it. Amber connectors are dogs winding "
+                  "down.")
             alltraj = rows("""
                 SELECT dog_id, current_index, projected_index, pct_change
                 FROM ML.V_TRAJECTORY
@@ -3743,9 +3796,16 @@ def _page_4():
                     proj = float(r["PROJECTED_INDEX"] or 0)
                     lbl = f'dog {int(r["DOG_ID"])}'
                     hue = S_ORANGE if proj < cur else S_BLUE
+                    # A soft wide pass under the connector, so a long move
+                    # reads as a heavier band than a short one at a glance.
                     fig.add_trace(go.Scatter(
                         x=[cur, proj], y=[lbl, lbl], mode="lines",
-                        line=dict(color=hue, width=2), hoverinfo="skip"))
+                        line=dict(color=alpha(hue, 0.16), width=9),
+                        hoverinfo="skip", showlegend=False))
+                    fig.add_trace(go.Scatter(
+                        x=[cur, proj], y=[lbl, lbl], mode="lines",
+                        line=dict(color=hue, width=2), hoverinfo="skip",
+                        showlegend=False))
                     fig.add_trace(go.Scatter(
                         x=[cur, proj], y=[lbl, lbl], mode="markers",
                         marker=dict(color=[CARD, hue], size=8,
@@ -3753,11 +3813,11 @@ def _page_4():
                         text=[f'{lbl}<br>now {fmt(cur,4)}',
                               f'{lbl}<br>projected {fmt(proj,4)}'
                               f'<br>{fmt(r["PCT_CHANGE"],1)}%'],
-                        hoverinfo="text"))
+                        hoverinfo="text", showlegend=False))
                 fig.update_layout(title="activity index — now against projected",
                                   title_font_size=11)
-                chart(clean_axes(fig, y_zero_line=False),
-                      bars(len(alltraj)))
+                chart(evil_axes(fig, y_zero_line=False, dotted="x"),
+                      row_h(len(alltraj)))
             else:
                 empty_state("No forecasts yet.",
                             "ML.FORECAST needs ~100 training points per dog; "
@@ -4134,32 +4194,10 @@ def _page_6():
                        f"{acc_err[0]['CLASSIFIER']} trained and predicts "
                        f"normally. Verbatim: {acc_err[0]['ACCESSOR_ERROR'][:180]}")
 
-        st.markdown("**The feature, justifying itself**")
-        st.markdown('<span class="tt-quiet">Neck/back correlation by true label. '
-                    'Locomotion should sit high; neck-dominant behaviours should '
-                    'collapse toward zero. If they do not, the feature is wrong.'
-                    '</span>', unsafe_allow_html=True)
-        cbl = rows("SELECT * FROM STAGING.V_CORR_BY_LABEL ORDER BY avg_corr")
-        if PLOTLY and cbl:
-            fig = go.Figure()
-            for r in cbl:
-                fig.add_trace(go.Bar(
-                    x=[str(r["LABEL_PRIMARY"])],
-                    y=[float(r["AVG_CORR"] or 0)],
-                    marker=dict(color=S_ORANGE if (r["AVG_CORR"] or 0) < 0.4 else S_BLUE),
-                    error_y=dict(type="data", array=[float(r["SD_CORR"] or 0)],
-                                 color=BORDER, thickness=1, width=3),
-                    hovertext=[f'{r["LABEL_PRIMARY"]}<br>mean {fmt(r["AVG_CORR"],3)}'
-                          f'<br>median {fmt(r["MEDIAN_CORR"],3)}'
-                          f'<br>IQR {fmt(r["P25_CORR"],2)}–{fmt(r["P75_CORR"],2)}'
-                          f'<br>{fmt(r["EPOCHS"],0)} epochs'],
-                    hoverinfo="text", showlegend=False))
-            fig.update_layout(title="CORR(vm_neck, vm_back) by annotated behaviour",
-                              title_font_size=11, yaxis=dict(range=[-0.3, 1.0]))
-            chart(clean_axes(fig), H_MD)
-
     with c2:
-        st.markdown("**Contribution to deviation**")
+        panel("Contribution to deviation",
+              "Which slices of the pack move the deviation metric, and by "
+              "how much.")
         di = rows("SELECT * FROM ML.DRIVER_INSIGHTS LIMIT 200")
         if di:
             method = di[0].get("METHOD")
@@ -4188,14 +4226,53 @@ def _page_6():
                         hoverinfo="text"))
                     fig.update_layout(title="which slices move the deviation metric",
                                       title_font_size=11)
-                    chart(clean_axes(fig, y_zero_line=False), bars(len(top)))
+                    chart(evil_axes(fig, y_zero_line=False, dotted="x"),
+                          row_h(len(top)))
             else:
                 dataframe(di[:30], [(k, k.lower()) for k in list(di[0].keys())[:6]])
         else:
             empty_state("No driver insights.",
                         "CALL ML.SP_RUN_TOP_INSIGHTS(); check ML.FUNCTION_STATUS.")
 
-        st.markdown("**Confusion matrix, held-out dogs**")
+    # ----------------------------------------------------------------------
+    # SECOND ROW. The right column used to carry three sections against the
+    # left column's two, so this page ended with a table hanging off the
+    # bottom of one half. Three rows of two now, each pair a chart against a
+    # chart, and the per-class numbers get a figure of their own instead of
+    # being the leftover at the end.
+    # ----------------------------------------------------------------------
+    d1, d2 = st.columns(2)
+
+    with d1:
+        panel("The feature, justifying itself",
+              "Neck/back correlation by true label. Locomotion should sit "
+              "high; neck-dominant behaviours should collapse toward zero. "
+              "If they do not, the feature is wrong.")
+        cbl = rows("SELECT * FROM STAGING.V_CORR_BY_LABEL ORDER BY avg_corr")
+        if PLOTLY and cbl:
+            fig = go.Figure()
+            for r in cbl:
+                fig.add_trace(go.Bar(
+                    x=[str(r["LABEL_PRIMARY"])],
+                    y=[float(r["AVG_CORR"] or 0)],
+                    marker=dict(color=S_ORANGE if (r["AVG_CORR"] or 0) < 0.4 else S_BLUE),
+                    error_y=dict(type="data", array=[float(r["SD_CORR"] or 0)],
+                                 color=BORDER, thickness=1, width=3),
+                    hovertext=[f'{r["LABEL_PRIMARY"]}<br>mean {fmt(r["AVG_CORR"],3)}'
+                          f'<br>median {fmt(r["MEDIAN_CORR"],3)}'
+                          f'<br>IQR {fmt(r["P25_CORR"],2)}–{fmt(r["P75_CORR"],2)}'
+                          f'<br>{fmt(r["EPOCHS"],0)} epochs'],
+                    hoverinfo="text", showlegend=False))
+            fig.update_layout(title="CORR(vm_neck, vm_back) by annotated behaviour",
+                              title_font_size=11, yaxis=dict(range=[-0.3, 1.0]))
+            # NO CORNER RADIUS HERE. These bars carry an error bar each, and a
+            # rounded cap under a whisker reads as the whisker having a base.
+            chart(evil_axes(fig), H_MD)
+
+    with d2:
+        panel("Confusion matrix, held-out dogs",
+              "Row-normalised, so each row is one true state spread across "
+              "what the model called it.")
         cm = rows("SELECT * FROM ML.CONFUSION_MATRIX")
         if PLOTLY and cm:
             states = sorted({r["ACTUAL_STATE"] for r in cm} |
@@ -4211,16 +4288,53 @@ def _page_6():
                              f'{fmt(r["N"],0)} epochs ({r["PCT_OF_ACTUAL"]}%)')
             fig = go.Figure(go.Heatmap(
                 z=z, x=states, y=states, text=txt, hoverinfo="text",
-                colorscale=[[0, "#FFFFFF"], [1, INK]], showscale=False,
-                xgap=1, ygap=1))
+                colorscale=[[0, CARD], [1, INK]], showscale=False,
+                xgap=2, ygap=2))
             fig.update_layout(title="row-normalised, % of each true state",
                               title_font_size=11,
                               xaxis_title="predicted", yaxis_title="actual")
             chart(clean_axes(fig, y_zero_line=False), H_MD)
 
-        pc = rows("SELECT * FROM ML.CLASS_METRICS ORDER BY support DESC")
-        if pc:
-            st.markdown("**Per-class, on unseen dogs**")
+    # ----------------------------------------------------------------------
+    # THIRD ROW — the held-out numbers, as a shape and as a table.
+    # ----------------------------------------------------------------------
+    pc = rows("SELECT * FROM ML.CLASS_METRICS ORDER BY support DESC")
+    if pc:
+        f1c, f2c = st.columns(2)
+        with f1c:
+            panel("Per-class, as a shape",
+                  "Precision, recall and F1 for each state the model predicts "
+                  "on dogs it has never seen.")
+            if PLOTLY:
+                # A RADAR, AND ONLY BECAUSE THE SPOKES ARE COMMENSURABLE.
+                #
+                # Precision, recall and F1 are all proportions on [0, 1], so
+                # the enclosed area means something and a class that is small
+                # on every spoke is visibly small. This is the one shape on
+                # the page where that holds — a radar over, say, support and
+                # F1 together would draw a confident polygon out of a count
+                # and a ratio, which is exactly how the form gets abused.
+                _top = pc[:6]
+                fig = evil_radar(
+                    ["precision", "recall", "F1"],
+                    [(str(r["STATE"]),
+                      [float(r["PRECISION"] or 0), float(r["RECALL"] or 0),
+                       float(r["F1"] or 0)],
+                      SYMBOL_COLOURS[i % len(SYMBOL_COLOURS)])
+                     for i, r in enumerate(_top)],
+                    rng=[0, 1])
+                fig.update_layout(
+                    title=f"the {len(_top)} best-supported states, held out",
+                    title_font_size=11)
+                chart(fig, H_MD)
+                renderer_note(
+                    "plotly · radar",
+                    "Three axes that are all proportions on the same [0, 1] "
+                    "scale, which is the only condition under which the area "
+                    "a radar encloses is allowed to mean anything.")
+        with f2c:
+            panel("Per-class, on unseen dogs",
+                  "The same numbers, for reading rather than comparing.")
             html_table([{"s": r["STATE"], "p": fmt(r["PRECISION"], 3),
                          "r": fmt(r["RECALL"], 3), "f": fmt(r["F1"], 3),
                          "n": fmt(r["SUPPORT"], 0)} for r in pc],
