@@ -2159,7 +2159,7 @@ def _page_2():
                                           range=[palette.get(s, "#D6D3D1")
                                                  for s in order])),
                         tooltip=[alt.Tooltip("state:N", title="state")])
-                    .properties(width=1000, height=30))
+                    .properties(width=880, height=30))
                 # tt_alt's configure_facet spacing is 14 — correct everywhere
                 # else and wrong here, where the whole form depends on the rows
                 # overlapping. Overriding after it wins, because configure_*
@@ -2546,16 +2546,19 @@ def _page_3():
             # already built for the metric strip, and rebinding it to a chart
             # here would break any later reader of it in a way that only shows
             # up as a wrong number on screen.
-            p_code = counted("code", "which syndrome fired", "matches", 118,
+            p_code = counted("code", "which syndrome fired", "matches", 132,
                              sort=codes, colour_by=colour)
-            p_sev = counted("severity", "how severe", "matches", 78,
+            p_sev = counted("severity", "how severe", "matches", 132,
                             sort="descending")
-            p_system = counted("system", "which body system", "matches", 108,
+            p_system = counted("system", "which body system", "matches", 132,
                                sort="-x")
 
-            cross = alt.hconcat(
+            # The three counters share a height so their baselines line up,
+            # and each keeps its own x scale — they count different things and
+            # a shared axis would imply the three totals were comparable.
+            cross = alt.vconcat(
                 scatter,
-                alt.vconcat(p_code, p_sev, p_system, spacing=26)
+                alt.hconcat(p_code, p_sev, p_system, spacing=30)
             ).resolve_scale(color="independent", size="independent")
 
             altair_chart(tt_alt(cross), container=False)
