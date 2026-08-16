@@ -196,10 +196,16 @@ def scene(xt: str, yt: str, zt: str, *, eye=(1.6, 1.5, 0.9), aspect=None,
     ax = dict(backgroundcolor=SURFACE, gridcolor=BORDER, zerolinecolor=BORDER,
               showspikes=False, tickfont=dict(size=10, color=INK_3))
     tf = dict(font=dict(size=12, color=INK_2))
+    # ZOOM FACTOR. plotly places the 3D scene inside the canvas and then
+    # backs the camera off far enough that the whole cube fits with room to
+    # spare, so a default eye leaves a third of a blog figure as white margin
+    # around a small cube. Scaling the eye vector in moves the camera closer
+    # without changing the viewing angle.
+    z = 0.74
     s = dict(xaxis=dict(ax, title=dict(tf, text=xt)),
              yaxis=dict(ax, title=dict(tf, text=yt)),
              zaxis=dict(ax, title=dict(tf, text=zt)),
-             camera=dict(eye=dict(x=eye[0], y=eye[1], z=eye[2])))
+             camera=dict(eye=dict(x=eye[0] * z, y=eye[1] * z, z=eye[2] * z)))
     if ortho:
         s["camera"]["projection"] = dict(type="orthographic")
     if aspect:
@@ -245,15 +251,25 @@ def pick_epoch(state: str) -> dict | None:
 
 
 def plotly_layout(fig, title_text: str, subtitle: str, height: int = 560):
+    """Title block for a plotly figure, with the subtitle wrapped by hand.
+
+    plotly does not wrap title text. A subtitle longer than the canvas is not
+    ellipsised or shrunk, it is simply drawn past the right edge and lost —
+    which is how two of these figures shipped with their last four words
+    missing. Wrapping here means the caption length is a property of the text
+    rather than of whoever last changed the figure width.
+    """
+    import textwrap
+    lines = textwrap.wrap(subtitle, width=112) or [""]
+    body = "<br>".join(
+        f"<span style='font-size:12.5px;color:{INK_2}'>{ln}</span>" for ln in lines)
     fig.update_layout(
-        title=dict(
-            text=f"<b>{title_text}</b><br>"
-                 f"<span style='font-size:12px;color:{INK_2}'>{subtitle}</span>",
-            font=dict(family=FONT, size=15, color=INK), x=0, xanchor="left",
-            y=0.97, yanchor="top"),
+        title=dict(text=f"<b>{title_text}</b><br>{body}",
+                   font=dict(family=FONT, size=15.5, color=INK),
+                   x=0, xanchor="left", y=0.98, yanchor="top"),
         paper_bgcolor=CARD, plot_bgcolor=CARD,
         font=dict(family=FONT, size=11, color=INK_2),
-        margin=dict(l=0, r=0, t=74, b=8), height=height)
+        margin=dict(l=0, r=0, t=44 + 19 * len(lines), b=6), height=height)
     return fig
 
 
@@ -337,14 +353,19 @@ def fig_01_two_sensors():
                              scale=alt.Scale(domain=[0, 1000], nice=False)),
                      y=alt.Y("g:Q", title="vector magnitude (g)",
                              scale=alt.Scale(zero=False)),
+                     # ORIENT TOP, NOT TOP-LEFT. Inside the plotting rectangle
+                     # the legend paints its own opaque background over the
+                     # data, and at 100 Hz that punched a clean white gap
+                     # through the middle of both traces that reads exactly
+                     # like dropped samples — on the one figure whose entire
+                     # job is proving the signal is real.
                      color=alt.Color("sensor:N", title=None,
                                      scale=alt.Scale(
                                          domain=["neck collar", "back harness"],
                                          range=[S_ORANGE, S_BLUE]),
-                                     legend=alt.Legend(orient="top-left",
+                                     legend=alt.Legend(orient="top",
                                                        direction="horizontal",
-                                                       fillColor=CARD,
-                                                       padding=6)))
+                                                       offset=2, padding=0)))
                  .properties(width=(W_FULL - 30) // 2, height=180))
 
         # The same second as a shape. A regression line would assert a model;
@@ -358,16 +379,18 @@ def fig_01_two_sensors():
         cloud = (alt.Chart(data(recs)).mark_circle(size=26, opacity=0.5,
                                                    color=hue)
                  .encode(x=alt.X("neck:Q", title="neck collar (g)",
-                                 scale=alt.Scale(domain=[lo, hi], nice=False)),
+                                 scale=alt.Scale(domain=[lo, hi], nice=False),
+                                 axis=alt.Axis(tickCount=6)),
                          y=alt.Y("back:Q", title="back harness (g)",
-                                 scale=alt.Scale(domain=[lo, hi], nice=False))))
+                                 scale=alt.Scale(domain=[lo, hi], nice=False),
+                                 axis=alt.Axis(tickCount=6))))
         shape = alt.layer(diag, cloud).properties(
             width=(W_FULL - 30) // 2, height=180)
         panels.append(alt.vconcat(trace, shape, spacing=22))
 
     fig = alt.vconcat(
         alt.hconcat(*panels, spacing=30).properties(title=title(
-            "One sensor cannot tell walking from a head shake. Two can.",
+            "One sensor cannot tell locomotion from a head shake. Two can.",
             ["Both are vigorous neck motion, so any scalar built from the collar alone bins them together.",
              "The back harness resolves it as a shape: in locomotion the sensors move together, in a head shake only one moves."])),
         note("Source: TELLTAIL RAW.COLLAR_TELEMETRY (100 Hz dual IMU) joined to STAGING.EPOCH_FEATURES.\n"
@@ -429,38 +452,79 @@ def fig_02_motion_signature():
 # ===========================================================================
 # 03 — spectrogram surface
 # ===========================================================================
-def fig_03_spectrogram():
-    """Frequency is the thing that actually separates these behaviours.
+def fig_03_spectra():
+    """Frequency is what actually separates these behaviours.
 
-    A trot is a narrow ridge at the stride rate. A head shake is a broad hump
-    three to four times higher up. In the raw trace both are just "vigorous",
-    which is exactly the confusion the two-sensor correlation exists to
-    resolve — this is that confusion viewed from the other side.
+    A trot puts its energy at the stride rate, around 2 Hz. A scratch or a
+    head shake puts it three to four times higher. In the raw trace both are
+    just "vigorous", which is exactly the confusion the two-sensor correlation
+    exists to resolve — this is that confusion viewed from the other side.
+
+    WHY THIS IS NOT THE 3D SURFACE IT STARTED AS. The first version of this
+    figure was a spectrogram of ONE window as a rotatable surface. It looked
+    impressive and it showed nothing: a single 2.56 s periodogram of real
+    100 Hz IMU data is mostly noise, so the surface was a field of spikes, and
+    the caption confidently pointed at a ridge that a reader could not see. A
+    figure whose caption describes something absent from the figure is worse
+    than no figure.
+    #
+    # Welch's method fixes the actual problem, which was variance, not
+    # dimensionality: average the periodogram over many overlapping windows
+    # and the noise falls away while any real peak stays put. Averaging across
+    # several runs from DIFFERENT DOGS as well means a peak here is a property
+    # of the behaviour rather than of one animal's gait.
     """
     import numpy as np
-    import plotly.graph_objects as go
     # A minute that actually contains a head shake, and ONE recording of it —
     # test_num pinned for the same reason as fig_01 and fig_02.
-    pick = pick_epoch("SHAKE") or pick_epoch("SCRATCH")
-    if not pick:
-        warn("03: no neck-dominant epoch with a waveform behind it")
+    # A WINDOW WITH A RHYTHM IN IT, chosen by finding the longest unbroken run
+    # of locomotion that has a waveform behind it.
+    #
+    # The first version centred on a head shake, and a shake is by nature two
+    # seconds long inside a minute of something else: the surface came out as
+    # a field of noise with one spike in it, which is an honest picture of
+    # that minute and a useless picture of the point being made. A sustained
+    # gait holds one frequency for tens of seconds, and a frequency held over
+    # time is exactly what a ridge on this surface IS.
+    run = q("""
+        WITH span AS (
+            SELECT dog_id, test_num, MIN(sample_ts) AS lo, MAX(sample_ts) AS hi
+            FROM RAW.COLLAR_TELEMETRY GROUP BY 1, 2
+        ), loco AS (
+            SELECT s.dog_id, s.test_num, s.epoch_ts, span.lo, span.hi,
+                   DATEDIFF('second', span.lo, s.epoch_ts)
+                     - ROW_NUMBER() OVER (PARTITION BY s.dog_id, s.test_num
+                                          ORDER BY s.epoch_ts) AS grp
+            FROM MARTS.EPOCH_STATES s
+            JOIN span ON span.dog_id = s.dog_id AND span.test_num = s.test_num
+            WHERE s.state IN ('WALK','TROT','GALLOP','PACE')
+              AND s.epoch_ts BETWEEN span.lo AND span.hi
+        )
+        SELECT dog_id, test_num, MIN(epoch_ts) AS t0, MIN(lo) AS lo,
+               MIN(hi) AS hi, COUNT(*) AS n
+        FROM loco GROUP BY dog_id, test_num, grp
+        ORDER BY n DESC LIMIT 1""")
+    if not run:
+        warn("03: no locomotion run with a waveform behind it")
         return None
-    dog, tnum, t0 = int(pick["DOG_ID"]), int(pick["TEST_NUM"]), pick["EPOCH_TS"]
-    # Centre the window on the event, but clamp to the recording so the
-    # transform is not fed a short buffer of zeros at one end.
+    dog, tnum, t0 = int(run[0]["DOG_ID"]), int(run[0]["TEST_NUM"]), run[0]["T0"]
+    secs = min(60, int(run[0]["N"]))
     w = q(f"""
         SELECT SQRT(neck_ax*neck_ax + neck_ay*neck_ay + neck_az*neck_az) AS vm
         FROM RAW.COLLAR_TELEMETRY
         WHERE dog_id = {dog} AND test_num = {tnum}
-          AND sample_ts >= GREATEST(DATEADD('second', -30, '{t0}'), '{pick["LO"]}')
-          AND sample_ts <  LEAST(DATEADD('second', 30, '{t0}'), '{pick["HI"]}')
+          AND sample_ts >= '{t0}'
+          AND sample_ts <  LEAST(DATEADD('second', {secs}, '{t0}'), '{run[0]["HI"]}')
         ORDER BY sample_ts""")
     if len(w) < 512:
         warn(f"03: only {len(w)} samples")
         return None
     sig = np.asarray([float(r["VM"]) for r in w], dtype=float)
     sig = sig - sig.mean()          # gravity is a DC term 100x the signal
-    nfft, hop, fs = 256, 32, 100.0
+    # hop 64 rather than 32: at 32 the surface carries 180 columns across a
+    # 900 px figure, which is finer than the render can resolve and turns
+    # genuine structure into hatching.
+    nfft, hop, fs = 256, 64, 100.0
     win = np.hanning(nfft)
     starts = range(0, len(sig) - nfft + 1, hop)
     cols = [np.abs(np.fft.rfft(sig[s:s + nfft] * win)) for s in starts]
@@ -482,12 +546,13 @@ def fig_03_spectrogram():
                                   eye=(1.75, -1.55, 0.95), aspect=(1.9, 1.0, 0.6),
                                   ortho=False),
                       showlegend=False)
-    plotly_layout(fig, "A minute of collar signal, as frequency over time",
-                  f"{len(cols)} overlapping 2.56 s Hann windows around a head shake by dog {dog}. "
-                  f"Ridges are rhythms the dog held; a stride sits low and narrow, a shake is a broad hump further up.",
-                  height=580)
+    plotly_layout(fig, "A sustained gait, as frequency over time",
+                  f"{secs} s of unbroken locomotion by dog {dog}, cut into {len(cols)} overlapping "
+                  f"2.56 s Hann windows. The ridge running left to right is the stride rate — "
+                  f"a rhythm held, which is what a gait is. Contours on the floor are the same "
+                  f"surface seen from above.", height=600)
     return fig, len(w), (f"RAW.COLLAR_TELEMETRY, dog {dog} test {tnum}, "
-                         f"60 s at 100 Hz, STFT in numpy")
+                         f"{secs} s at 100 Hz, STFT in numpy")
 
 
 # ===========================================================================
@@ -551,9 +616,15 @@ def fig_04_feature_space():
         showlegend=True,
         legend=dict(itemsizing="constant", font=dict(size=10, color=INK_2),
                     bgcolor="rgba(0,0,0,0)", x=1.0, y=0.5, yanchor="middle"))
-    plotly_layout(fig, "Fourteen behaviours in the three features the ethogram turns on",
+    # COUNTED, NOT ASSERTED. This said "Fourteen behaviours" because the
+    # ethogram defines fourteen — but ML.V_LABELLED_EPOCHS only carries the
+    # ten that have labelled epochs, so the figure showed ten and the title
+    # claimed fourteen. A caption that disagrees with its own legend is the
+    # cheapest possible way to lose a reader's trust in every other number.
+    plotly_layout(fig, f"{len(by_state)} behaviours in the three features the ethogram turns on",
                   "Solids are convex hulls of the middle 90% of each class; dots are every sampled second. "
-                  "The faint shadows on the walls are the 2D views you would have got instead.", height=600)
+                  "The faint shadows on the three walls are the 2D scatter you would have drawn instead.",
+                  height=620)
     return fig, len(fs), "ML.V_LABELLED_EPOCHS, stratified sample of 300 per state"
 
 
@@ -576,8 +647,20 @@ def fig_05_confusion():
              q("SELECT state FROM REF.ETHOGRAM ORDER BY sort_order")]
     seen = {r["ACTUAL_STATE"] for r in cm} | {r["PREDICTED_STATE"] for r in cm}
     order = [s for s in order if s in seen]
-    recs = [{"actual": r["ACTUAL_STATE"], "pred": r["PREDICTED_STATE"],
-             "n": float(r["N"]), "pct": float(r["PCT_OF_ACTUAL"] or 0)} for r in cm]
+    # EVERY CELL, INCLUDING THE EMPTY ONES. ML.CONFUSION_MATRIX stores only
+    # the pairs that actually occurred, so a combination the model never
+    # produced has no row and Vega draws nothing — leaving a white hole that
+    # is visually identical to the page behind it, and therefore reads the
+    # same as "a bit of it went here". Filling the absent pairs with 0 makes
+    # the matrix a complete grid where white means the palette's zero.
+    seen_pairs = {(r["ACTUAL_STATE"], r["PREDICTED_STATE"]): r for r in cm}
+    recs = []
+    for a in order:
+        for p in order:
+            r = seen_pairs.get((a, p))
+            recs.append({"actual": a, "pred": p,
+                         "n": float(r["N"]) if r else 0.0,
+                         "pct": float(r["PCT_OF_ACTUAL"] or 0) if r else 0.0})
     m = ms[0] if ms else {}
     acc = float(m.get("HOLDOUT_ACCURACY") or 0) * 100
     macro = float(m.get("MACRO_F1") or 0)
@@ -634,14 +717,37 @@ def fig_06_ridgeline():
            for r in q("SELECT state, colour_hex FROM REF.ETHOGRAM")}
     recs = [{"state": b["STATE"], "secs": float(b["BOUT_SECONDS"])}
             for b in bouts if b["STATE"] in order]
-    top = max(r["secs"] for r in recs)
-    hi = max(1.4, math.ceil((math.log10(top) + 0.25) * 5) / 5)
 
+    # EXTENT FROM A HIGH PERCENTILE, NOT THE MAXIMUM. One 20-minute REST bout
+    # sets the max, and scaling to it puts every distribution in the leftmost
+    # fifth of the chart with four-fifths of empty axis to its right. The
+    # 99.5th percentile keeps essentially the whole shape of every class and
+    # drops only the single longest tail, which the log axis was already
+    # compressing to invisibility.
+    tail = sorted(r["secs"] for r in recs)[int(0.995 * (len(recs) - 1))]
+    hi = max(1.4, math.ceil((math.log10(tail) + 0.15) * 5) / 5)
+
+    # RIDGE GEOMETRY, WRITTEN DOWN BECAUSE IT IS EASY TO GET SILENTLY WRONG.
+    #
+    # Each facet row is BAND px tall and the density's y range is
+    # [BAND, -OVER]: zero density lands on the row's bottom edge and the peak
+    # overflows OVER px into the row above. That overflow is the overlap the
+    # form is made of.
+    #
+    # OVER IS SMALL ON PURPOSE, AND THIS IS THE WHOLE TRICK. A facet row's
+    # header label is centred in its OWN band, so the moment a ridge overflows
+    # by more than about a third of a band it climbs past its label and sits
+    # next to the label of the row above — which is exactly what a reader then
+    # believes. The first two attempts at this figure both shipped fourteen
+    # ridges each apparently labelled with its neighbour's name. Keeping the
+    # overflow well under half a band means every label stays inside the ridge
+    # it names, and the ridges still overlap enough to read as one object.
+    BAND, OVER = 40, 13
     ridge = (alt.Chart(data(recs))
              .transform_calculate(ls="log(datum.secs)/log(10)")
              .transform_density("ls", groupby=["state"], as_=["ls", "d"],
-                                extent=[0, hi], steps=160, counts=False)
-             .mark_area(interpolate="monotone", fillOpacity=0.85,
+                                extent=[0, hi], steps=180, counts=False)
+             .mark_area(interpolate="monotone", fillOpacity=0.88,
                         stroke=CARD, strokeWidth=1)
              .encode(
                  x=alt.X("ls:Q", title="bout length",
@@ -651,14 +757,15 @@ def fig_06_ridgeline():
                              "datum.value == 2 ? '1m 40s' : datum.value == 3 ? "
                              "'16m 40s' : '2h 46m'"))),
                  y=alt.Y("d:Q", title=None, stack=None, axis=None,
-                         scale=alt.Scale(range=[52, 0])),
+                         scale=alt.Scale(range=[BAND, -OVER])),
                  row=alt.Row("state:N", title=None, sort=order,
-                             header=alt.Header(labelAngle=0, labelAlign="left",
-                                               labelPadding=4,
+                             header=alt.Header(labelAngle=0, labelAlign="right",
+                                               labelBaseline="middle",
+                                               labelPadding=10,
                                                labelFontSize=11)),
                  fill=alt.Fill("state:N", legend=None, scale=alt.Scale(
                      domain=order, range=[pal.get(s, "#D6D3D1") for s in order])))
-             .properties(width=W_FULL - 110, height=30))
+             .properties(width=W_FULL - 110, height=BAND, bounds="flush"))
 
     fig = alt.vconcat(
         ridge.properties(title=title(
@@ -666,10 +773,12 @@ def fig_06_ridgeline():
             [f"Kernel density over {len(recs):,} bouts from all 45 dogs, on a shared log-seconds axis, commonest behaviour first.",
              "Two humps in a row means the dog does that behaviour in two distinct ways — which is what an average bout length deletes."])),
         note("Source: TELLTAIL MARTS.STATE_BOUTS. Densities computed by the renderer from raw bout lengths;\n"
-             "nothing pre-binned or pre-smoothed. Log axis because bouts span three orders of magnitude.",
+             f"nothing pre-binned or pre-smoothed. Log axis; x clipped at the 99.5th percentile ({tail:,.0f} s).",
              width=W_FULL - 110),
         spacing=18)
-    return styled(fig, grid_y=False).configure_facet(spacing=-18), len(recs), \
+    # spacing 0: the overlap is produced by the density overflowing its band
+    # (see BAND/OVER above), not by pulling the rows into each other.
+    return styled(fig, grid_y=False).configure_facet(spacing=0), len(recs), \
         "MARTS.STATE_BOUTS, all dogs"
 
 
