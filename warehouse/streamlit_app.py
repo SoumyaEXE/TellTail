@@ -1875,10 +1875,72 @@ def _page_0():
         ("on chain",           fmt(one(stats, "ATTESTATIONS_ONCHAIN", 0), 0)),
     ])
 
-    left, right = st.columns([3, 1])
+    # ------------------------------------------------------------------
+    # THE WARD ROUND, AS A ROOM YOU CAN WALK AROUND.
+    #
+    # This page was a [3, 1] split: 45 cards on the left, a brief and a stacked
+    # bar squeezed into a quarter-width rail on the right, and the two columns
+    # ending hundreds of pixels apart. The cards are the page and they now get
+    # the whole width; what was the rail is a proper half-row above them.
+    #
+    # And the pack gets a chart it never had. Forty-five cards tell you about
+    # ONE DOG AT A TIME — that is what a card is for — so the question a ward
+    # round actually opens with, "who is unusual, and unusual how", had no
+    # answer anywhere on the page. Three numbers per dog answer it and they are
+    # already in the query.
+    # ------------------------------------------------------------------
+    a1, a2 = st.columns(2)
 
-    with right:
-        st.markdown("**Pack brief**")
+    with a1:
+        panel("The pack in its own measure space",
+              "Every dog on the two deviations that matter and the number of "
+              "findings each has. Drag to rotate; the cluster at the origin "
+              "is a healthy pack.")
+        if PLOTLY and pack:
+            # THE TWO z AXES ARE NOT THE SAME QUESTION AND THAT IS THE POINT.
+            # z_self is a dog against its own trailing hour; z_cohort is the
+            # same dog against others of its breed, age and weight. A dog high
+            # on one and flat on the other is the interesting case, and it is
+            # invisible in any 2D view that picks one of them.
+            fig = go.Figure()
+            for sev in sorted({d.get("TRIAGE_SEVERITY") for d in pack},
+                              key=lambda s: (s is None, s)):
+                grp = [d for d in pack if d.get("TRIAGE_SEVERITY") == sev]
+                if not grp:
+                    continue
+                hue = TRIAGE_COLOUR.get(sev, "#A8A29E")
+                lbl = grp[0].get("TRIAGE_LABEL") or "not triaged"
+                fig.add_trace(go.Scatter3d(
+                    x=[float(d.get("Z_SELF") or 0) for d in grp],
+                    y=[float(d.get("Z_COHORT") or 0) for d in grp],
+                    z=[float(d.get("N_FINDINGS") or 0) for d in grp],
+                    mode="markers", name=str(lbl),
+                    marker=dict(
+                        color=hue, size=7, opacity=0.9,
+                        line=dict(color=CARD, width=1)),
+                    text=[f'Dog {d["DOG_ID"]} · {d.get("BREED") or "unknown"}'
+                          f'<br>z self {fmt(d.get("Z_SELF"))}'
+                          f'<br>z cohort {fmt(d.get("Z_COHORT"))}'
+                          f'<br>{fmt(d.get("N_FINDINGS") or 0, 0)} findings'
+                          f'<br>{d.get("TRIAGE_LABEL") or "not triaged"}'
+                          for d in grp],
+                    hoverinfo="text"))
+            scene3d(fig, "z vs own baseline", "z vs cohort", "findings")
+            fig.update_layout(
+                showlegend=True,
+                legend=dict(orientation="h", y=0.02, x=0.5, xanchor="center",
+                            font=dict(size=10)))
+            chart3d(fig, H_LG)
+            renderer_note(
+                "plotly · 3D",
+                f"{len(pack)} dogs, three measured axes, no projection chosen "
+                f"for you. Colour is the triage band a Cortex task wrote into "
+                f"AI.TRIAGE — it is not one of the three axes, so agreement "
+                f"between position and colour is a result rather than a "
+                f"construction.")
+
+    with a2:
+        panel("Pack brief", "AI_AGG over the cached notes, written by a task.")
         brief = rows("SELECT brief, n_findings, n_dogs, generated_at FROM AI.PACK_BRIEF")
         if brief:
             st.markdown(
@@ -1894,22 +1956,16 @@ def _page_0():
 
         # The ward round in one bar: how the pack splits across triage bands.
         # Reads the `pack` rows already in memory, so it costs no extra query.
-        st.markdown("**Triage mix**")
+        panel("Triage mix", "The same 45 dogs, counted into bands.")
         bands: dict = {}
         for d in pack:
             k = (d.get("TRIAGE_LABEL") or "not triaged", d.get("TRIAGE_SEVERITY"))
             bands[k] = bands.get(k, 0) + 1
         if PLOTLY and bands:
             ordered = sorted(bands.items(), key=lambda kv: -(kv[0][1] or 0))
-            fig = go.Figure()
-            for (lbl, sev), n in ordered:
-                fig.add_trace(go.Bar(
-                    x=[n], y=["pack"], orientation="h",
-                    marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E"),
-                                line=dict(width=0)),
-                    hovertext=[f"{lbl}: {n} dogs"], hoverinfo="text", showlegend=False))
-            fig.update_layout(barmode="stack",
-                              xaxis=dict(visible=False), yaxis=dict(visible=False))
+            fig = evil_blocks([(lbl, n, TRIAGE_COLOUR.get(sev, "#A8A29E"))
+                               for (lbl, sev), n in ordered])
+            fig.update_layout(showlegend=False)
             chart(clean_axes(fig), H_STRIP)
             st.markdown(" ".join(
                 f'<span class="tt-chip" style="background:'
@@ -1917,54 +1973,85 @@ def _page_0():
                 f'{TRIAGE_COLOUR.get(sev, "#A8A29E")}">{lbl} <b>{n}</b></span>'
                 for (lbl, sev), n in ordered), unsafe_allow_html=True)
 
-        st.markdown("**Provenance**")
-        if prov:
-            html_table(
-                [{"s": r["STATE_SOURCE"], "n": fmt(r["EPOCHS"], 0),
-                  "p": f'{r["PCT"]}%'} for r in prov],
-                [("s", "source"), ("n", "epochs"), ("p", "share")])
+        # THE THREE RAIL METERS, AS ARCS. Same numbers the sidebar prints as
+        # bars; drawn here because this is the page where the reader is
+        # deciding how much to trust everything downstream of it.
+        if PLOTLY and pack:
+            _hit = sum(1 for d in pack if (d.get("N_FINDINGS") or 0) > 0)
+            _model = 1.0 - (heur / tot) if prov else None
+            gauges = [("dogs with a finding", _hit, len(pack), "#B91C1C",
+                       f"{_hit}/{len(pack)}")]
+            if _model is not None:
+                gauges.append(("model-derived states", _model, 1.0, ACCENT,
+                               f"{100 * _model:.0f}%"))
+            gauges.append(("epochs heuristic",
+                           sum(float(d.get("EPOCHS_HEURISTIC") or 0) for d in pack),
+                           sum(float(d.get("EPOCHS_TOTAL") or 0) for d in pack) or 1.0,
+                           "#A8A29E", None))
+            gcols = st.columns(len(gauges))
+            for gc, (lbl, val, den, hue, sub) in zip(gcols, gauges):
+                with gc:
+                    fig = evil_radial(val, den, hue, label=lbl, sub=sub or "")
+                    fig.update_layout(margin=dict(l=2, r=2, t=4, b=22),
+                                      annotations=list(fig.layout.annotations) + [
+                                          dict(text=lbl, x=0.5, y=-0.14,
+                                               showarrow=False, xref="paper",
+                                               yref="paper",
+                                               font=dict(size=9.5, color=INK_2))])
+                    st.plotly_chart(fig, use_container_width=True,
+                                    config={"displayModeBar": False})
 
-    with left:
-        sort = st.radio("sort", ["triage severity", "deviation from own baseline", "dog id"],
-                        horizontal=True, label_visibility="collapsed")
-        if sort == "deviation from own baseline":
-            pack = sorted(pack, key=lambda r: -abs(r.get("Z_SELF") or 0))
-        elif sort == "dog id":
-            pack = sorted(pack, key=lambda r: r.get("DOG_ID") or 0)
+    # ------------------------------------------------------------------
+    # THE CARD GRID, NOW FULL WIDTH AND FOUR ACROSS.
+    # ------------------------------------------------------------------
+    st.markdown("---")
+    panel("The ward round",
+          "One card per dog, ordered by how much attention it wants.")
+    sort = st.radio("sort", ["triage severity", "deviation from own baseline", "dog id"],
+                    horizontal=True, label_visibility="collapsed")
+    if sort == "deviation from own baseline":
+        pack = sorted(pack, key=lambda r: -abs(r.get("Z_SELF") or 0))
+    elif sort == "dog id":
+        pack = sorted(pack, key=lambda r: r.get("DOG_ID") or 0)
 
-        if not pack:
-            empty_state("No dogs yet.",
-                        "Run scripts/load_raw.py then scripts/run_sql.py --all.")
-        palette = state_palette()
-        photos = breed_photos()          # once, not once per card
-        spark = rows("""
-            SELECT dog_id, epoch_ts, activity_index
-            FROM MARTS.ACTIVITY_EPOCH
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id ORDER BY epoch_ts DESC) <= 60
-            ORDER BY dog_id, epoch_ts
-        """)
-        by_dog: dict = {}
-        for r in spark:
-            by_dog.setdefault(r["DOG_ID"], []).append(r["ACTIVITY_INDEX"])
+    if not pack:
+        empty_state("No dogs yet.",
+                    "Run scripts/load_raw.py then scripts/run_sql.py --all.")
+    palette = state_palette()
+    photos = breed_photos()          # once, not once per card
+    spark = rows("""
+        SELECT dog_id, epoch_ts, activity_index
+        FROM MARTS.ACTIVITY_EPOCH
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY dog_id ORDER BY epoch_ts DESC) <= 60
+        ORDER BY dog_id, epoch_ts
+    """)
+    by_dog: dict = {}
+    for r in spark:
+        by_dog.setdefault(r["DOG_ID"], []).append(r["ACTIVITY_INDEX"])
 
-        for chunk_start in range(0, len(pack), 3):
-            cards = st.columns(3)
-            for c, d in zip(cards, pack[chunk_start:chunk_start + 3]):
-                sev = d.get("TRIAGE_SEVERITY")
-                colour = TRIAGE_COLOUR.get(sev, "#A8A29E")
-                label = d.get("TRIAGE_LABEL") or "not triaged"
-                state = d.get("CURRENT_STATE") or "—"
-                stale_s = d.get("SECONDS_SINCE_LAST_EPOCH")
-                # Past a week this is not lag, it is the 2018 bulk corpus. Say
-                # which, rather than printing "stale 17,715,743s" and hoping.
-                live = stale_s is not None and float(stale_s) < 604800
-                freshness = (f'<span style="color:{ACCENT}">&#9679;</span> {ago(stale_s)} ago'
-                             if live else '<span style="opacity:.55">&#9675;</span> corpus')
-                spark = sparkline_svg(by_dog.get(d["DOG_ID"]) or [],
-                                      colour=ACCENT if live else "#C9C4BE")
-                photo = breed_photo(d.get("BREED"), 44, photos=photos)
-                with c:
-                    st.markdown(f"""
+    # FOUR PER ROW, NOT THREE. The grid used to live in three quarters of the
+    # page; at full width three cards left a third of each row as whitespace
+    # inside the card, which stretched the breed line and broke the fixed
+    # card height the stylesheet works to maintain.
+    PER_ROW = 4
+    for chunk_start in range(0, len(pack), PER_ROW):
+        cards = st.columns(PER_ROW)
+        for c, d in zip(cards, pack[chunk_start:chunk_start + PER_ROW]):
+            sev = d.get("TRIAGE_SEVERITY")
+            colour = TRIAGE_COLOUR.get(sev, "#A8A29E")
+            label = d.get("TRIAGE_LABEL") or "not triaged"
+            state = d.get("CURRENT_STATE") or "—"
+            stale_s = d.get("SECONDS_SINCE_LAST_EPOCH")
+            # Past a week this is not lag, it is the 2018 bulk corpus. Say
+            # which, rather than printing "stale 17,715,743s" and hoping.
+            live = stale_s is not None and float(stale_s) < 604800
+            freshness = (f'<span style="color:{ACCENT}">&#9679;</span> {ago(stale_s)} ago'
+                         if live else '<span style="opacity:.55">&#9675;</span> corpus')
+            spark = sparkline_svg(by_dog.get(d["DOG_ID"]) or [],
+                                  colour=ACCENT if live else "#C9C4BE")
+            photo = breed_photo(d.get("BREED"), 44, photos=photos)
+            with c:
+                st.markdown(f"""
 <div class="tt-card tt-dogcard">
   <div class="tt-dogcard-head">
     <div class="tt-dogcard-id">
@@ -1992,22 +2079,65 @@ def _page_0():
   </div>
 </div>""", unsafe_allow_html=True)
 
-        # Said once under the grid rather than 45 times inside it, and repeated
-        # in the rail. A photograph implying it is the animal being diagnosed
-        # would be the single most misleading thing on this screen.
-        if photos:
-            n_appx = sum(1 for r in photos.values() if r.get("IS_APPROXIMATE"))
-            st.markdown(
-                f'<div class="tt-quiet" style="margin-top:6px">'
-                f'Thumbnails are <b>reference photographs of the breed</b>, never '
-                f'of the study animal — {len(photos)} breeds covered, {n_appx} of '
-                f'them by a near-matching breed (amber ring). Dogs with no '
-                f'reference photo get a drawn icon on a dashed ring — visibly '
-                f'not a photograph, which is the point. '
-                f'{list(photos.values())[0].get("CREDIT") or ""} '
-                f'Placeholder icon: Font Awesome via svgrepo.com, CC BY 4.0.'
-                f'</div>',
-                unsafe_allow_html=True)
+    # Said once under the grid rather than 45 times inside it, and repeated
+    # in the rail. A photograph implying it is the animal being diagnosed
+    # would be the single most misleading thing on this screen.
+    if photos:
+        n_appx = sum(1 for r in photos.values() if r.get("IS_APPROXIMATE"))
+        st.markdown(
+            f'<div class="tt-quiet" style="margin-top:6px">'
+            f'Thumbnails are <b>reference photographs of the breed</b>, never '
+            f'of the study animal — {len(photos)} breeds covered, {n_appx} of '
+            f'them by a near-matching breed (amber ring). Dogs with no '
+            f'reference photo get a drawn icon on a dashed ring — visibly '
+            f'not a photograph, which is the point. '
+            f'{list(photos.values())[0].get("CREDIT") or ""} '
+            f'Placeholder icon: Font Awesome via svgrepo.com, CC BY 4.0.'
+            f'</div>',
+            unsafe_allow_html=True)
+
+    # ------------------------------------------------------------------
+    # THE NUMBERS UNDER THE PAGE, PAIRED.
+    #
+    # Provenance used to be the last thing in the quarter-width rail, where it
+    # was three rows of table under a chart under a card — the bottom of a
+    # column that had already run out. It is the honesty statement for
+    # everything above it and it gets a half-row of its own, against the
+    # triage counts it should be read next to.
+    # ------------------------------------------------------------------
+    p1, p2 = st.columns(2)
+    with p1:
+        panel("Provenance",
+              "Where each epoch's state came from. The heuristic share is the "
+              "banner at the top of every tab, in numbers.")
+        if prov:
+            html_table(
+                [{"s": r["STATE_SOURCE"], "n": fmt(r["EPOCHS"], 0),
+                  "p": f'{r["PCT"]}%'} for r in prov],
+                [("s", "source"), ("n", "epochs"), ("p", "share")])
+        else:
+            empty_state("No provenance rows.",
+                        "MARTS.V_STATE_PROVENANCE is empty.")
+    with p2:
+        panel("Triage bands",
+              "How the pack splits, and how many findings sit behind each "
+              "band.")
+        if bands:
+            _rows = []
+            for (lbl, sev), n in sorted(bands.items(), key=lambda kv: -(kv[0][1] or 0)):
+                _f = sum((d.get("N_FINDINGS") or 0) for d in pack
+                         if (d.get("TRIAGE_LABEL") or "not triaged") == lbl)
+                _rows.append({
+                    "b": f'<span class="tt-badge" style="background:'
+                         f'{TRIAGE_COLOUR.get(sev, "#A8A29E")}">{lbl}</span>',
+                    "n": fmt(n, 0),
+                    "s": fmt(sev, 0) if sev is not None else "—",
+                    "f": fmt(_f, 0)})
+            html_table(_rows, [("b", "band"), ("n", "dogs"),
+                               ("s", "severity"), ("f", "findings")])
+        else:
+            empty_state("Nothing triaged yet.",
+                        "AI.T_AI writes AI.TRIAGE on a task.")
 
 
 # ===========================================================================
@@ -3028,12 +3158,28 @@ def _page_3():
             fig = go.Figure()
             for c in codes:
                 pts = [f for f in finds if f["SYNDROME_CODE"] == c]
+                # A HALO UNDER EVERY DOT, WHICH IS A GLOW DOING A JOB.
+                #
+                # These findings pile up — one dog can fire the same syndrome
+                # four times in an evening, which puts four dots within a few
+                # pixels of one another. Flat marks in that situation merge
+                # into one blob and the reader counts one finding. A wide,
+                # very faint copy of the same marker underneath makes overlap
+                # read as DENSITY: two dots stacked are visibly darker than
+                # one, so the pile-up is legible without moving anything.
+                fig.add_trace(go.Scatter(
+                    x=[str(f["ONSET_TS"]) for f in pts],
+                    y=[float(f["DOG_ID"]) for f in pts],
+                    mode="markers", showlegend=False, hoverinfo="skip",
+                    marker=dict(color=alpha(cmap[c], 0.16), line=dict(width=0),
+                                size=[16 + 20 * float(f["CONFIDENCE"] or 0)
+                                      for f in pts])))
                 fig.add_trace(go.Scatter(
                     x=[str(f["ONSET_TS"]) for f in pts],
                     y=[float(f["DOG_ID"]) for f in pts],
                     mode="markers", name=c,
-                    marker=dict(color=cmap[c], line=dict(width=0),
-                                opacity=0.85,
+                    marker=dict(color=cmap[c], opacity=0.9,
+                                line=dict(color=CARD, width=1),
                                 size=[6 + 10 * float(f["CONFIDENCE"] or 0)
                                       for f in pts]),
                     text=[f'{c} · {f["SYNDROME_NAME"]}<br>dog {int(f["DOG_ID"])}'
@@ -3050,7 +3196,7 @@ def _page_3():
                 title_font_size=11, showlegend=True,
                 legend=dict(orientation="h", y=-0.2, font=dict(size=10)),
                 yaxis=dict(title="dog id"))
-            chart(clean_axes(fig, y_zero_line=False), H_MD)
+            chart(evil_axes(fig, y_zero_line=False, dotted="xy"), H_MD)
             st.markdown('<span class="tt-quiet">The band running bottom-left to '
                         'top-right is not a trend — the bulk corpus was loaded '
                         'dog by dog, so onset time and dog id increase together '
@@ -3435,34 +3581,48 @@ def _page_4():
             base = [float(r["BASELINE_INDEX"] or 0) for r in dev]
             sd = [float(r["BASELINE_STD"] or 0) for r in dev]
             fig = go.Figure()
+            # The ±2 SD band stays a flat grey fill and is NOT given a
+            # gradient. It is a region of tolerance, not a quantity — a ramp
+            # across it would imply the edges of normal are less normal than
+            # the middle, which is the opposite of what two standard
+            # deviations means.
             fig.add_trace(go.Scatter(x=xs, y=[b + 2 * s for b, s in zip(base, sd)],
                                      mode="lines", line=dict(width=0),
                                      hoverinfo="skip", showlegend=False))
             fig.add_trace(go.Scatter(x=xs, y=[b - 2 * s for b, s in zip(base, sd)],
                                      mode="lines", line=dict(width=0), fill="tonexty",
-                                     fillcolor="rgba(168,162,158,0.22)",
+                                     fillcolor=alpha("#A8A29E", 0.20),
                                      hoverinfo="skip", showlegend=False))
             fig.add_trace(go.Scatter(x=xs, y=base, mode="lines",
                                      line=dict(color=INK_2, width=1, dash="dot"),
                                      hoverinfo="skip", showlegend=False))
-            fig.add_trace(go.Scatter(
-                x=xs, y=[float(r["ACTIVITY_INDEX"] or 0) for r in dev], mode="lines",
-                line=dict(color=S_ORANGE, width=1.5),
+            # The dog's actual activity DOES get the full treatment: it is the
+            # measured quantity, it is the only thing on the chart the reader
+            # is meant to follow, and the glow is what lifts a 1.5px line off
+            # a grey band it spends most of its time inside.
+            evil_area(
+                fig, xs, [float(r["ACTIVITY_INDEX"] or 0) for r in dev],
+                S_ORANGE, width=1.6, shape="linear", fill=None, cap=True,
                 text=[f'{fmt(r["ACTIVITY_INDEX"],3)}<br>z_self {fmt(r["Z_SELF"],2)}'
-                      f'{" · SYNTHETIC" if r.get("IS_SYNTHETIC") else ""}' for r in dev],
-                hoverinfo="text", showlegend=False))
+                      f'{" · SYNTHETIC" if r.get("IS_SYNTHETIC") else ""}'
+                      for r in dev])
             fig.update_layout(
                 title="today against this dog's own trailing hour "
                       "(shaded band = ±2 SD of its own normal)",
                 title_font_size=11)
-            chart(clean_axes(fig, y_zero_line=False), H_MD)
+            chart(evil_axes(fig, y_zero_line=False), H_MD)
+            renderer_note(
+                "plotly · area",
+                f"{len(dev):,} epochs against a trailing baseline joined with "
+                f"ASOF JOIN. The band is the dog's own ±2 SD, so leaving it is "
+                f"abnormal FOR THIS DOG rather than abnormal for a dog.")
 
         # The left column used to be a five-row table and a three-row table
         # against a full-height chart on the right — half the page ended 600px
         # above the other half. The cohort comparison is a DISTRIBUTION
         # question ("is this dog unusual for dogs like it"), and a distribution
         # answered with two averages is the weakest possible form of it.
-        c1, c2 = st.columns([1, 2])
+        c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Against its cohort**")
             st.markdown('<span class="tt-quiet">Every dog in the same weight and '
@@ -4090,31 +4250,146 @@ def _page_7():
     if not intake and not punch:
         empty_state("No shelter data.", "Run: python scripts/austin_sync.py")
     else:
-        c1, c2 = st.columns(2)
-        with c1:
+        # ------------------------------------------------------------------
+        # THIS PAGE WAS THE WORST OF THE RAGGED ONES.
+        #
+        # The left column held an intake chart, a 16-bar LOS chart AND an
+        # 18-row table; the right held two small bar panels and a prose card.
+        # Left ran roughly four hundred pixels past right, so the tab ended in
+        # a column of table against a column of nothing. Four equal rows now,
+        # each half sized against the other, and the two tables are paired at
+        # the bottom instead of one hanging off the end.
+        # ------------------------------------------------------------------
+        r1l, r1r = st.columns(2)
+
+        with r1l:
+            panel("A decade of intakes",
+                  "Austin Animal Center, every dog through the door, with the "
+                  "behaviour-linked share drawn inside the total rather than "
+                  "beside it.")
             if PLOTLY and intake:
+                months = [str(r["MONTH"])[:10] for r in intake]
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=[str(r["MONTH"])[:10] for r in intake],
-                    y=[float(r["N"] or 0) for r in intake], mode="lines",
-                    line=dict(color="#D6D3D1", width=1.4),
-                    text=[f'{str(r["MONTH"])[:7]}: {fmt(r["N"],0)} dog intakes'
-                          for r in intake], hoverinfo="text"))
-                fig.add_trace(go.Scatter(
-                    x=[str(r["MONTH"])[:10] for r in intake],
-                    y=[float(r["BEHAVIOUR_N"] or 0) for r in intake], mode="lines",
-                    line=dict(color=S_ORANGE, width=1.8),
-                    text=[f'{str(r["MONTH"])[:7]}: {fmt(r["BEHAVIOUR_N"],0)} '
-                          f'behaviour-linked' for r in intake], hoverinfo="text"))
+                # Total first and underneath: the behaviour-linked series is a
+                # SUBSET of it, so drawing it on top as a smaller filled area
+                # says "this much of that" in the shape itself. Two lines on a
+                # shared baseline would have said "these two things", which is
+                # a different and wrong claim.
+                evil_area(fig, months, [float(r["N"] or 0) for r in intake],
+                          "#A8A29E", show_glow=False, top=0.22,
+                          text=[f'{str(r["MONTH"])[:7]}: {fmt(r["N"],0)} '
+                                f'dog intakes' for r in intake])
+                evil_area(fig, months,
+                          [float(r["BEHAVIOUR_N"] or 0) for r in intake],
+                          S_ORANGE, cap=True,
+                          text=[f'{str(r["MONTH"])[:7]}: '
+                                f'{fmt(r["BEHAVIOUR_N"],0)} behaviour-linked'
+                                for r in intake])
                 fig.update_layout(title="Austin Animal Center dog intakes — "
                                         f"<span style='color:{S_ORANGE}'>"
                                         "behaviour-linked</span> against the total",
                                   title_font_size=11)
-                chart(clean_axes(fig), H_MD)
-            if los:
-                st.markdown("**Median length of stay, days**")
-                st.markdown('<span class="tt-quiet">The cost of a behavioural '
-                            'label, visible in days.</span>', unsafe_allow_html=True)
+                chart(evil_axes(fig), H_LG)
+                renderer_note(
+                    "plotly · area",
+                    f"{len(intake)} months of the City of Austin open data "
+                    f"portal. The fill is a vertical alpha ramp of one hue, "
+                    f"not a blend of two — an invented intermediate colour "
+                    f"would not carry the separation the palette was validated "
+                    f"for.")
+
+        with r1r:
+            panel("Why this tab exists",
+                  "The shelter is where an unread behavioural signal ends up.")
+            st.markdown(f"""
+<div class="tt-card" style="font-size:13px;line-height:1.7">
+Austin publishes a decade of intake and outcome records for every animal that
+passes through its shelter. Behaviour is a named outcome reason in that data,
+sitting alongside aggression and medical. Austin is a no-kill shelter and over
+ninety percent of its animals are adopted, transferred or returned — which is
+what makes the behavioural tail pointed rather than routine.
+<br><br>
+The categories in the panels below were detected on a collar, at home, from
+movement alone. The categories beside them were written down at intake, after
+the relationship had already broken down. They are the same categories.
+<br><br>
+<b>The dog was showing the pattern for eleven days before anyone noticed. The
+warehouse noticed on day two.</b>
+<br><br>
+<span class="tt-quiet">Austin only. Not generalised to national claims.</span>
+</div>""", unsafe_allow_html=True)
+
+        # ------------------------------------------------------------------
+        # SECOND ROW — length of stay, as a field and as a ranking.
+        # ------------------------------------------------------------------
+        if los:
+            r2l, r2r = st.columns(2)
+
+            with r2l:
+                panel("Length of stay, as a field",
+                      "Every breed group against every intake condition, "
+                      "height is the median wait in days. Drag to rotate.")
+                if PLOTLY:
+                    # STEMS, NOT A SURFACE, AND THE SPARSITY IS THE REASON.
+                    #
+                    # breed group x intake condition is a grid with holes in
+                    # it: most combinations never reach the n >= 50 floor this
+                    # query applies, so a surface would either interpolate a
+                    # ridge across combinations that were never measured, or
+                    # tear a hole in the mesh that reads as a rendering fault.
+                    # A stem stands only where there is a number, which is the
+                    # honest shape of a sparse grid — and the marker on top
+                    # carries n, so a tall stem on 51 animals cannot be
+                    # mistaken for a tall stem on 7,463.
+                    bg = sorted({str(r["BREED_GROUP"]) for r in los})
+                    ic = sorted({str(r["INTAKE_CONDITION"]) for r in los})
+                    bgi = {s: i for i, s in enumerate(bg)}
+                    ici = {s: i for i, s in enumerate(ic)}
+                    fig = go.Figure()
+                    ns = [float(r["N"] or 0) for r in los]
+                    nmax = max(ns or [1.0])
+                    for r in los:
+                        gx, gy = bgi[str(r["BREED_GROUP"])], ici[str(r["INTAKE_CONDITION"])]
+                        z = float(r["MEDIAN_LOS_DAYS"] or 0)
+                        beh = str(r["INTAKE_CONDITION"] or "").upper() in (
+                            "BEHAVIOR", "BEHAVIOUR")
+                        hue = S_ORANGE if beh else "#A8A29E"
+                        fig.add_trace(go.Scatter3d(
+                            x=[gx, gx], y=[gy, gy], z=[0, z], mode="lines",
+                            line=dict(color=alpha(hue, 0.55), width=5),
+                            hoverinfo="skip", showlegend=False))
+                        fig.add_trace(go.Scatter3d(
+                            x=[gx], y=[gy], z=[z], mode="markers",
+                            marker=dict(
+                                color=hue, size=7 + 13 * (float(r["N"] or 0) / nmax),
+                                line=dict(color=CARD, width=1)),
+                            text=[f'{r["BREED_GROUP"]} · {r["INTAKE_CONDITION"]}'
+                                  f'<br>median {fmt(r["MEDIAN_LOS_DAYS"],1)} days'
+                                  f'<br>{fmt(r["N"],0)} animals'],
+                            hoverinfo="text", showlegend=False))
+                    scene3d(fig, "breed group", "intake condition",
+                            "median LOS (days)")
+                    fig.update_layout(scene=dict(
+                        xaxis=dict(tickmode="array",
+                                   tickvals=list(range(len(bg))), ticktext=bg,
+                                   tickfont=dict(size=8, color=INK_2)),
+                        yaxis=dict(tickmode="array",
+                                   tickvals=list(range(len(ic))), ticktext=ic,
+                                   tickfont=dict(size=8, color=INK_2)),
+                        aspectmode="manual",
+                        aspectratio=dict(x=1.3, y=1.1, z=0.75)))
+                    chart3d(fig, H_LG)
+                    renderer_note(
+                        "plotly · 3D",
+                        f"{len(los)} breed-group x condition cells, marker size "
+                        f"is n. Only combinations with at least 50 animals are "
+                        f"here — the empty floor is a sample-size floor, not a "
+                        f"shelter with no such dogs.")
+
+            with r2r:
+                panel("Median length of stay, days",
+                      "The cost of a behavioural label, visible in days. The "
+                      "track behind each bar is the longest wait on the chart.")
                 if PLOTLY:
                     # Behaviour-flagged intakes highlighted against everything
                     # else, because that is the comparison the tab is making:
@@ -4124,81 +4399,90 @@ def _page_7():
                              for r in top]
                     beh = [str(r["INTAKE_CONDITION"] or "").upper() in
                            ("BEHAVIOR", "BEHAVIOUR") for r in top]
-                    fig = go.Figure(go.Bar(
-                        x=[float(r["MEDIAN_LOS_DAYS"] or 0) for r in top],
-                        y=names, orientation="h",
-                        marker=dict(color=[S_ORANGE if b else "#D6D3D1"
-                                           for b in beh]),
-                        hovertext=[f'{n}<br>median {fmt(r["MEDIAN_LOS_DAYS"],1)} days'
+                    fig = go.Figure()
+                    evil_bar(
+                        fig, names,
+                        [float(r["MEDIAN_LOS_DAYS"] or 0) for r in top],
+                        [S_ORANGE if b else "#D6D3D1" for b in beh],
+                        text=[f'{n}<br>median {fmt(r["MEDIAN_LOS_DAYS"],1)} days'
                               f'<br>{fmt(r["N"],0)} animals'
-                              for n, r in zip(names, top)],
-                        hoverinfo="text"))
+                              for n, r in zip(names, top)])
                     fig.update_layout(
                         title="longest waits first — "
                               f"<span style='color:{S_ORANGE}'>behaviour</span> "
                               "intakes against every other condition",
                         title_font_size=11)
-                    chart(clean_axes(fig, y_zero_line=False),
-                          bars(len(names)))
+                    chart(evil_axes(fig, y_zero_line=False, dotted="x"), H_LG)
+                    renderer_note(
+                        "plotly · bar",
+                        "Same rows as the field beside it, ranked instead of "
+                        "placed. The 3D answers 'where in the grid'; this "
+                        "answers 'how much', which is the reading a rotated "
+                        "scene is bad at.")
+
+        # ------------------------------------------------------------------
+        # THIRD ROW — TWO PANELS, NOT TWO Y-AXES.
+        #
+        # Collar detections are in the tens and shelter records in the
+        # thousands. Drawn against a shared axis, or against two axes in one
+        # frame, the bars would invite a comparison the numbers do not support.
+        # The point of this tab does not need them to be comparable: it is that
+        # the SAME CATEGORIES appear in both places. Small multiples say that
+        # without the arithmetic sleight of hand — and side by side rather than
+        # stacked, because the categories are meant to be read across.
+        # ------------------------------------------------------------------
+        if PLOTLY and punch:
+            codes = [r["SYNDROME_CODE"] for r in punch]
+            r3 = st.columns(2)
+            for cell, (key, label, hue, note) in zip(r3, (
+                ("TELLTAIL_DETECTIONS", "detected on a collar, at home",
+                 INK, "detections"),
+                ("SHELTER_BEHAVIOUR_RECORDS",
+                 "written down at intake, after the fact", S_ORANGE,
+                 "shelter records"),
+            )):
+                with cell:
+                    panel(label, "")
+                    fig = go.Figure()
+                    evil_bar(
+                        fig, codes, [float(r[key] or 0) for r in punch],
+                        [hue] * len(codes), horizontal=False,
+                        text=[f'{r["SYNDROME_CODE"]} {r["SYNDROME_NAME"]}<br>'
+                              f'{fmt(r[key], 0)} {note}' for r in punch])
+                    chart(evil_axes(fig), H_SM)
+            st.markdown(
+                '<div class="tt-quiet" style="margin-top:-6px">Same '
+                'categories, two independent counts — deliberately on their '
+                'own scales in their own panels. One is a handful of dogs '
+                'wearing a collar for a few days; the other is a decade of a '
+                'city shelter.</div>', unsafe_allow_html=True)
+
+        # ------------------------------------------------------------------
+        # FOURTH ROW — the numbers behind both halves, paired so neither
+        # table overhangs the other.
+        # ------------------------------------------------------------------
+        _los_rows, _punch_rows, _trimmed = table_pair(los, punch, cap=18)
+        t1, t2 = st.columns(2)
+        with t1:
+            panel("Length of stay, in full",
+                  f"{'the ' + str(len(_los_rows)) + ' longest waits' if _trimmed else 'every cell'} "
+                  f"with at least 50 animals")
+            if _los_rows:
                 html_table([{"b": r["BREED_GROUP"], "c": r["INTAKE_CONDITION"],
                              "d": fmt(r["MEDIAN_LOS_DAYS"], 1), "n": fmt(r["N"], 0)}
-                            for r in los[:18]],
+                            for r in _los_rows],
                            [("b", "breed group"), ("c", "intake condition"),
                             ("d", "median LOS"), ("n", "n")])
-
-        with c2:
-            # TWO PANELS, NOT TWO Y-AXES.
-            #
-            # Collar detections are in the tens and shelter records in the
-            # thousands, and the old chart put them on separate scales side by
-            # side — which draws two bars the same height and lets the reader
-            # conclude the counts are comparable. They are not, and the point of
-            # this tab does not need them to be: it is that the SAME CATEGORIES
-            # appear in both places. Small multiples say that without the
-            # arithmetic sleight of hand.
-            if PLOTLY and punch:
-                codes = [r["SYNDROME_CODE"] for r in punch]
-                for key, label, hue, note in (
-                    ("TELLTAIL_DETECTIONS", "detected on a collar, at home",
-                     INK, "detections"),
-                    ("SHELTER_BEHAVIOUR_RECORDS",
-                     "written down at intake, after the fact", S_ORANGE,
-                     "shelter records"),
-                ):
-                    fig = go.Figure(go.Bar(
-                        x=codes, y=[float(r[key] or 0) for r in punch],
-                        marker=dict(color=hue),
-                        hovertext=[f'{r["SYNDROME_CODE"]} {r["SYNDROME_NAME"]}<br>'
-                                   f'{fmt(r[key], 0)} {note}' for r in punch],
-                        hoverinfo="text"))
-                    fig.update_layout(title=label, title_font_size=11)
-                    chart(clean_axes(fig), H_SM)
-                st.markdown(
-                    '<div class="tt-quiet" style="margin-top:-6px">Same '
-                    'categories, two independent counts — deliberately on their '
-                    'own scales in their own panels. One is a handful of dogs '
-                    'wearing a collar for a few days; the other is a decade of a '
-                    'city shelter. Drawn against a shared axis, or against two '
-                    'axes in one frame, the bars would invite a comparison the '
-                    'numbers do not support.</div>', unsafe_allow_html=True)
-
-            st.markdown(f"""
-<div class="tt-card" style="font-size:13px;line-height:1.7">
-Austin publishes a decade of intake and outcome records for every animal that
-passes through its shelter. Behaviour is a named outcome reason in that data,
-sitting alongside aggression and medical. Austin is a no-kill shelter and over
-ninety percent of its animals are adopted, transferred or returned — which is
-what makes the behavioural tail pointed rather than routine.
-<br><br>
-The categories on the left of this chart were detected on a collar, at home,
-from movement alone. The categories on the right were written down at intake,
-after the relationship had already broken down. They are the same categories.
-<br><br>
-<b>The dog was showing the pattern for eleven days before anyone noticed. The
-warehouse noticed on day two.</b>
-<br><br>
-<span class="tt-quiet">Austin only. Not generalised to national claims.</span>
-</div>""", unsafe_allow_html=True)
+        with t2:
+            panel("The same categories, counted twice",
+                  "detected on a collar against written down at intake")
+            if _punch_rows:
+                html_table([{"c": r["SYNDROME_CODE"], "s": r["SYNDROME_NAME"],
+                             "t": fmt(r["TELLTAIL_DETECTIONS"], 0),
+                             "a": fmt(r["SHELTER_BEHAVIOUR_RECORDS"], 0)}
+                            for r in _punch_rows],
+                           [("c", "code"), ("s", "syndrome"),
+                            ("t", "collar"), ("a", "shelter")])
 
 
 # ===========================================================================
