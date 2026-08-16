@@ -3864,30 +3864,85 @@ def _page_5():
         # The caseload this note sits inside, before the note itself. Which
         # syndromes generated notes, and how those notes were triaged — from
         # the rows already fetched, so the overview costs nothing.
-        panel("The caseload these notes came from",
-              "Every cached note, by syndrome and by the triage band "
-              "AI_CLASSIFY assigned it. Read the bar first, then pick a note "
-              "out of it.")
-        if PLOTLY:
-            codes = sorted({n["SYNDROME_CODE"] for n in notes})
-            sevs = sorted({n.get("SEVERITY") for n in notes},
-                          key=lambda s: -(s or 0))
-            fig = go.Figure()
-            for sev in sevs:
-                bucket = [n for n in notes if n.get("SEVERITY") == sev]
-                lbl = (bucket[0].get("TRIAGE_LABEL") if bucket else None) or "untriaged"
-                ys = [sum(1 for n in bucket if n["SYNDROME_CODE"] == c) for c in codes]
-                fig.add_trace(go.Bar(
-                    x=codes, y=ys, name=str(lbl),
-                    marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E")),
-                    hovertext=[f"{c} · {lbl}: {y} notes" for c, y in zip(codes, ys)],
-                    hoverinfo="text"))
-            fig.update_layout(barmode="stack", showlegend=True,
-                              legend=dict(orientation="h", y=-0.18,
-                                          font=dict(size=10)),
-                              title="cached notes by syndrome, stacked by triage band",
-                              title_font_size=11)
-            chart(evil_axes(fig), H_SM)
+        k1, k2 = st.columns(2)
+
+        with k1:
+            panel("The caseload these notes came from",
+                  "Every cached note, by syndrome and by the triage band "
+                  "AI_CLASSIFY assigned it. Read the bar first, then pick a "
+                  "note out of it.")
+            if PLOTLY:
+                codes = sorted({n["SYNDROME_CODE"] for n in notes})
+                sevs = sorted({n.get("SEVERITY") for n in notes},
+                              key=lambda s: -(s or 0))
+                fig = go.Figure()
+                for sev in sevs:
+                    bucket = [n for n in notes if n.get("SEVERITY") == sev]
+                    lbl = (bucket[0].get("TRIAGE_LABEL") if bucket else None) or "untriaged"
+                    ys = [sum(1 for n in bucket if n["SYNDROME_CODE"] == c) for c in codes]
+                    fig.add_trace(go.Bar(
+                        x=codes, y=ys, name=str(lbl),
+                        marker=dict(color=TRIAGE_COLOUR.get(sev, "#A8A29E")),
+                        hovertext=[f"{c} · {lbl}: {y} notes" for c, y in zip(codes, ys)],
+                        hoverinfo="text"))
+                fig.update_layout(barmode="stack", showlegend=True,
+                                  legend=dict(orientation="h", y=-0.18,
+                                              font=dict(size=10)),
+                                  title="cached notes by syndrome, stacked by triage band",
+                                  title_font_size=11)
+                chart(evil_axes(fig), H_LG)
+
+        with k2:
+            panel("Did the triage agree with the measurements?",
+                  "Every note on the three numbers the pattern engine "
+                  "returned, coloured by the band Cortex put it in. Drag to "
+                  "rotate.")
+            if PLOTLY:
+                # THE COLOUR IS NOT ONE OF THE AXES, WHICH IS THE WHOLE TEST.
+                #
+                # Duration, confidence and model purity are mechanical: they
+                # fall out of MATCH_RECOGNIZE and the classifier without an
+                # LLM anywhere near them. The triage band is Cortex's opinion,
+                # written by a task into AI.TRIAGE. Plotting the opinion as
+                # COLOUR over the measurements as POSITION means the two can
+                # visibly disagree — if the red points were scattered evenly
+                # through the cloud, the triage would be decorative. They are
+                # not, and that is checkable here rather than asserted.
+                fig = go.Figure()
+                for sev in sorted({n.get("SEVERITY") for n in notes},
+                                  key=lambda s: (s is None, s)):
+                    grp = [n for n in notes if n.get("SEVERITY") == sev]
+                    if not grp:
+                        continue
+                    lbl = grp[0].get("TRIAGE_LABEL") or "not yet triaged"
+                    fig.add_trace(go.Scatter3d(
+                        x=[float(n.get("DURATION_S") or 0) for n in grp],
+                        y=[float(n.get("CONFIDENCE") or 0) for n in grp],
+                        z=[float(n.get("MODEL_PURITY") or 0) for n in grp],
+                        mode="markers", name=str(lbl),
+                        marker=dict(
+                            color=TRIAGE_COLOUR.get(sev, "#A8A29E"),
+                            size=[4 + 9 * min(1.0, float(n.get("N_EPOCHS") or 0) / 60.0)
+                                  for n in grp],
+                            opacity=0.86, line=dict(color=CARD, width=0.6)),
+                        text=[f'{n["SYNDROME_CODE"]} · dog {n["DOG_ID"]}'
+                              f'<br>{fmt(n.get("DURATION_S"), 0)}s over '
+                              f'{fmt(n.get("N_EPOCHS"), 0)} epochs'
+                              f'<br>confidence {fmt(n.get("CONFIDENCE"), 3)}'
+                              f'<br>model purity {fmt(n.get("MODEL_PURITY"), 3)}'
+                              f'<br>{n.get("TRIAGE_LABEL")}' for n in grp],
+                        hoverinfo="text"))
+                scene3d(fig, "duration (s)", "confidence", "model purity")
+                fig.update_layout(
+                    showlegend=True,
+                    legend=dict(orientation="h", y=0.02, x=0.5,
+                                xanchor="center", font=dict(size=10)))
+                chart3d(fig, H_LG)
+                renderer_note(
+                    "plotly · 3D",
+                    f"{len(notes)} cached notes. Position is measured, colour "
+                    f"is generated — so the two can be seen to agree rather "
+                    f"than being asserted to.")
 
         labels = [f'{n["SYNDROME_CODE"]} · dog {n["DOG_ID"]} · '
                   f'{str(n["ONSET_TS"])[:19]} · {n["TRIAGE_LABEL"]}' for n in notes]
