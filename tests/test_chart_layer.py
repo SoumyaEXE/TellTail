@@ -29,6 +29,14 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "warehouse"))
 
+# A plotly property error quotes the offending value, and plotly writes its
+# minus signs as U+2212. On a Windows console that is cp1252 and printing the
+# message raises UnicodeEncodeError ON TOP of the failure being reported —
+# which loses the actual error and reports an encoding bug instead.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 FAILED: list[str] = []
 
 
@@ -37,8 +45,11 @@ def check(label: str, fn) -> None:
         fn()
         print(f"  ok    {label}")
     except Exception as e:  # noqa: BLE001 - the point is to catch everything
-        FAILED.append(f"{label}: {type(e).__name__}: {e}")
-        print(f"  FAIL  {label}: {type(e).__name__}: {e}")
+        # First line only. A plotly property error is ~90 lines of valid-property
+        # listing, and forty of those in a row is unreadable.
+        msg = str(e).strip().split("\n")[0][:160]
+        FAILED.append(f"{label}: {type(e).__name__}: {msg}")
+        print(f"  FAIL  {label}: {type(e).__name__}: {msg}")
 
 
 def load_app():
