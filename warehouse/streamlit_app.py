@@ -18,7 +18,7 @@ Plus two more: On Chain, the published attestations with a link out to Solana
 Explorer for every one of them, and Ask TELLTAIL, Cortex answering only from
 rows.
 
-SIX SiS-ONLY HAZARDS, ALL HANDLED HERE. Every one of them reproduces nowhere
+NINE SiS-ONLY HAZARDS, ALL HANDLED HERE. Every one of them reproduces nowhere
 else, which is what makes them expensive:
 
   1. Snowpark to_pandas() returns numerics as object-dtype Decimal. Plotly then
@@ -40,7 +40,24 @@ else, which is what makes them expensive:
   6. Custom bidirectional components cannot be installed — there is no way to
      serve a component's frontend bundle from the sandbox. The chat on the
      last page is AI-Yash/st-chat's design ported to plain HTML and CSS, with
-     locally drawn avatars in place of its DiceBear URLs.
+     locally drawn avatars in place of its DiceBear URLs. THE SAME RULE IS WHY
+     THE CHART LANGUAGE HERE IS A PORT: evilcharts.com is React on Recharts
+     or ECharts, so its gradients, glows, rounded caps and radial/radar/sankey
+     forms are rebuilt on plotly and vega instead of installed. See "THE CHART
+     LANGUAGE" below.
+  7. SiS ships ALTAIR 4. Selections were renamed wholesale in Altair 5, and
+     the 5 spelling — alt.selection_point, .add_params — raises AttributeError
+     at render time and takes the whole Syndromes tab down with it. Every
+     development machine has Altair 5 or 6, so it cannot be reproduced locally
+     at all. alt_point()/alt_bind() resolve the spelling at call time.
+  8. The plotly version is not knowable from here. Old Streamlit implies an
+     old conda solve, and plotly raises ValueError at figure CONSTRUCTION for
+     a property it does not know — so fillgradient (5.23), barcornerradius
+     (5.19) and griddash (5.5) are each probed at import with HAS_* and each
+     has a defined fallback. Nothing in the chart layer assumes a version.
+  9. A webfont referenced by URL never loads and never says so. The typeface
+     is embedded as base64 woff2 in tt_font.py and staged next to this file;
+     the import is guarded, so a stage without it renders in the old stack.
 
 AND ONE ARCHITECTURAL RULE: this app reads TABLES. It never calls a Cortex AI
 function, because a render path that costs credits is a render path that will
@@ -2586,14 +2603,12 @@ def _page_1():
                 t_ax = [float(s) / fs_hz for s in starts]
                 floor = float(np.percentile(spec, 5))
 
-                st.markdown("**The same seconds as frequency over time**")
-                st.markdown(
-                    '<span class="tt-quiet">Drag to rotate. Each ridge running '
-                    'left to right is a rhythm the dog held: a stride sits low '
-                    'and narrow around 2 Hz, a head shake is a broad hump up at '
-                    '5–9 Hz, and stillness is flat. Height and colour are the '
-                    'same number — power in dB — so nothing rests on judging a '
-                    'height by eye.</span>', unsafe_allow_html=True)
+                panel("The same seconds as frequency over time",
+                      "Drag to rotate. Each ridge running left to right is a rhythm "
+                      "the dog held: a stride sits low and narrow around 2 Hz, a head "
+                      "shake is a broad hump up at 5–9 Hz, and stillness is flat. "
+                      "Height and colour are the same number — power in dB — so "
+                      "nothing rests on judging a height by eye.")
                 fig = go.Figure(go.Surface(
                     x=t_ax, y=[float(f) for f in freqs[keep]],
                     z=np.clip(spec, floor, None),
@@ -2808,14 +2823,12 @@ def _page_2():
                 # its own kernel's tail.
                 top = max(r["secs"] for r in ridge)
                 hi = max(1.4, math.ceil((math.log10(top) + 0.25) * 5) / 5)
-                st.markdown("**How long a bout of each behaviour actually lasts**")
-                st.markdown(
-                    '<span class="tt-quiet">One kernel density per state over '
-                    'the same log-seconds axis, tallest first. The ridge is '
-                    'the shape of the distribution, not a bar — a state with '
-                    'two humps is a behaviour the dog does in two distinct '
-                    'ways, which is the thing a mean bout length is guaranteed '
-                    'to hide.</span>', unsafe_allow_html=True)
+                panel("How long a bout of each behaviour actually lasts",
+                      "One kernel density per state over the same log-seconds axis, "
+                      "tallest first. The ridge is the shape of the distribution, not "
+                      "a bar — a state with two humps is a behaviour the dog does in "
+                      "two distinct ways, which is the thing a mean bout length is "
+                      "guaranteed to hide.")
                 # Overlap: each row is 30px tall and draws 46px of area, so
                 # consecutive ridges cut into one another the way the form is
                 # supposed to. Positive spacing here would just be fourteen
@@ -3256,14 +3269,13 @@ def _page_3():
                 "quality": float(f["AVG_QUALITY"] or 0),
             } for f in finds]
 
-            st.markdown("**Ask it your own question**")
-            st.markdown(
-                '<span class="tt-quiet">Drag a box across the scatter. The three '
-                'panels beside it re-count to describe only what you selected, '
-                'and the pale bars behind them stay put as the totals you are '
-                'taking a fraction of. Click a syndrome bar to push the filter '
-                'the other way. Shift-click to add codes; double-click any '
-                'blank area to clear.</span>', unsafe_allow_html=True)
+            panel("Ask it your own question",
+                  "Drag a box across the scatter. The three panels beside it "
+                  "re-count to describe only what you selected, and the pale bars "
+                  "behind them stay put as the totals you are taking a fraction "
+                  "of. Click a syndrome bar to push the filter the other way. "
+                  "Shift-click to add codes; double-click any blank area to "
+                  "clear.")
 
             adata = avals(slim)
             brush = alt.selection_interval(encodings=["x", "y"], name="brush")
@@ -3385,13 +3397,12 @@ def _page_3():
             # the codes from each other — S6 is short and dense, S3 is long and
             # sparse. Any 2D pair of them puts two codes on top of one another.
             # ------------------------------------------------------------------
-            st.markdown("**The findings in their own measure space**")
-            st.markdown('<span class="tt-quiet">Drag to rotate. Duration against '
-                        'epochs matched against confidence — the three numbers '
-                        'the pattern engine returns. Syndromes occupy different '
-                        'regions, which is the claim that they are different '
-                        'things rather than one detector fired six ways.</span>',
-                        unsafe_allow_html=True)
+            panel("The findings in their own measure space",
+                  "Drag to rotate. Duration against epochs matched against "
+                  "confidence — the three numbers the pattern engine returns. "
+                  "Syndromes occupy different regions, which is the claim that "
+                  "they are different things rather than one detector fired six "
+                  "ways.")
             fig = go.Figure()
             for c in codes:
                 pts = [f for f in finds if f["SYNDROME_CODE"] == c]
@@ -3634,10 +3645,9 @@ def _page_4():
         # answered with two averages is the weakest possible form of it.
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**Against its cohort**")
-            st.markdown('<span class="tt-quiet">Every dog in the same weight and '
-                        'age band, as a spread rather than an average. This dog '
-                        'is the amber box.</span>', unsafe_allow_html=True)
+            panel("Against its cohort",
+                  "Every dog in the same weight and age band, as a spread rather "
+                  "than an average. This dog is the amber box.")
             summ = rows(f"""
                 SELECT ROUND(AVG(z_self),3) AS z_self, ROUND(AVG(z_cohort),3) AS z_cohort,
                        ROUND(AVG(activity_index),4) AS idx,
@@ -3854,11 +3864,10 @@ def _page_5():
         # The caseload this note sits inside, before the note itself. Which
         # syndromes generated notes, and how those notes were triaged — from
         # the rows already fetched, so the overview costs nothing.
-        st.markdown("**The caseload these notes came from**")
-        st.markdown('<span class="tt-quiet">Every cached note, by syndrome and '
-                    'by the triage band AI_CLASSIFY assigned it. Read the bar '
-                    'first, then pick a note out of it.</span>',
-                    unsafe_allow_html=True)
+        panel("The caseload these notes came from",
+              "Every cached note, by syndrome and by the triage band "
+              "AI_CLASSIFY assigned it. Read the bar first, then pick a note "
+              "out of it.")
         if PLOTLY:
             codes = sorted({n["SYNDROME_CODE"] for n in notes})
             sevs = sorted({n.get("SEVERITY") for n in notes},
@@ -4002,13 +4011,11 @@ def _page_6():
     # three collapses two clusters on top of each other — project it yourself
     # by dragging the cube and you can watch it happen. Sampled per state so
     # the rare classes stay visible next to SNIFF.
-    st.markdown("**The feature space, in the three axes the ethogram turns on**")
-    st.markdown('<span class="tt-quiet">Drag to rotate. Each point is one '
-                'labelled second. Locomotion climbs the correlation axis; '
-                'SHAKE and SCRATCH climb the dominance axis; REST and SIT '
-                'collapse into the low-motion corner. This is the whole '
-                'classifier argument in one object.</span>',
-                unsafe_allow_html=True)
+    panel("The feature space, in the three axes the ethogram turns on",
+          "Drag to rotate. Each point is one labelled second. Locomotion "
+          "climbs the correlation axis; SHAKE and SCRATCH climb the "
+          "dominance axis; REST and SIT collapse into the low-motion "
+          "corner. This is the whole classifier argument in one object.")
     fs = rows("""
         SELECT state, neck_back_corr, vm_neck_std, neck_dominance
         FROM ML.V_LABELLED_EPOCHS
@@ -4627,10 +4634,9 @@ def _page_8():
     c1, c2 = st.columns(2)
 
     with c1:
-        st.markdown("**Dynamic Table refresh lag**")
-        st.markdown('<span class="tt-quiet">Declared target lag against observed. '
-                    'No cron anywhere in the feature, state, transition or '
-                    'baseline layers.</span>', unsafe_allow_html=True)
+        panel("Dynamic Table refresh lag",
+              "Declared target lag against observed. No cron anywhere in the "
+              "feature, state, transition or baseline layers.")
         lag = rows("SELECT * FROM MARTS.V_DAG_LAG ORDER BY schema_name, object_name")
         if PLOTLY and lag:
             # PLOTTED AS A RATIO, NOT IN SECONDS.
@@ -5152,13 +5158,10 @@ def _page_10():
     c1, c2 = st.columns(2)
 
     with c1:
-        st.markdown("**Publication funnel**")
-        st.markdown('<span class="tt-quiet">Every finding staged by '
-                    '<span class="tt-mono">ORACLE.T_ATTEST</span>, and how far '
-                    'it got. A claim only reaches CONFIRMED once the network '
-                    'has acknowledged the transaction and the bridge has '
-                    'written the signature back.</span>',
-                    unsafe_allow_html=True)
+        panel("Publication funnel",
+              "Every finding staged by ORACLE.T_ATTEST, and how far it got. A "
+              "claim only reaches CONFIRMED once the network has acknowledged "
+              "the transaction and the bridge has written the signature back.")
         if PLOTLY:
             order = [("PENDING", "#D6D3D1"), ("SENT", S_YELLOW),
                      ("CONFIRMED", "#15803D"), ("FAILED", "#B91C1C")]
@@ -5172,10 +5175,9 @@ def _page_10():
                 for s, h in present), unsafe_allow_html=True)
 
     with c2:
-        st.markdown("**What was attested**")
-        st.markdown('<span class="tt-quiet">By syndrome. Severity 1 findings '
-                    'are never published — routine monitoring is not a claim '
-                    'worth making permanent.</span>', unsafe_allow_html=True)
+        panel("What was attested",
+              "By syndrome. Severity 1 findings are never published — routine "
+              "monitoring is not a claim worth making permanent.")
         by_code: dict = {}
         for r in done:
             by_code[r["SYNDROME_CODE"]] = by_code.get(r["SYNDROME_CODE"], 0) + 1
